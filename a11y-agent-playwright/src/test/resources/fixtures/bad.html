@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="600">
+<title>Deliberately inaccessible fixture</title>
+<style>
+  body { font: 16px/1.4 Arial, sans-serif; margin: 0; padding: 0 24px 0; }   /* no bottom padding: last link ends up under the fixed footer */
+  *:focus { outline: none; }                       /* 2.4.7 failure: no focus indicator anywhere */
+  header { padding: 16px 0; }
+  .fixed-footer { position: fixed; left: 0; right: 0; bottom: 0; height: 120px; background: #222; color: #fff; padding: 12px; }
+  p a { color: #0645ad; text-decoration: none; }  /* 1.4.1 failure: colour only */
+  .icon-btn { width: 16px; height: 16px; padding: 0; border: 1px solid #999; background: #eee; display: inline-block; vertical-align: middle; }
+  .wide { width: 900px; height: 40px; background: #ddd; }  /* 1.4.10 failure at 320px */
+  .clip { width: 320px; height: 1.4em; line-height: 1.4; overflow: hidden; white-space: normal; }  /* 1.4.12 failure: wraps and clips when spacing grows */
+  .card { border: 1px solid #ccc; padding: 8px; margin: 8px 0; cursor: pointer; }
+  .spacer { height: 500px; }
+  .offscreen { position: absolute; left: -9999px; top: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Heading</h1>
+  <img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" width="120" height="60" alt="IMG_1234.jpg">
+  <img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" width="120" height="60" alt="image">
+  <a href="/promo"><img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" width="80" height="40" alt=""></a>
+</header>
+
+<main>
+  <p>Our full terms are available online. For details <a href="/terms">click here</a>. We also publish a privacy notice that you can read at any time.</p>
+  <ul>
+    <li><a href="/a">Read more</a></li>
+    <li><a href="/b">Read more</a></li>
+  </ul>
+  <p>Click the green button on the right to continue with your order.</p>
+
+  <div>
+    <button class="icon-btn" aria-label="Bold"></button><button class="icon-btn" aria-label="Italic"></button>
+  </div>
+
+  <button aria-label="Send message">Submit</button>
+
+  <marquee>Breaking news scrolls forever</marquee>
+
+  <div class="card" onclick="alert('opened')">Open details (div with onclick, not focusable)</div>
+
+  <div draggable="true" class="card">Drag me to reorder</div>
+
+  <span title="Extra information only in a tooltip">Hover for info</span>
+
+  <div class="wide">Fixed 900px wide banner</div>
+  <div class="clip">The quick brown fox jumps over the lazy dog</div>
+
+  <form action="/login" method="post">
+    <label for="email">Email address</label>
+    <input id="email" type="text" name="email">
+    <label for="pw">Password</label>
+    <input id="pw" type="password" name="pw" autocomplete="off" onpaste="return false">
+    <label for="misc">Field</label>
+    <input id="misc" type="text" name="misc">
+    <button type="submit">Log in</button>
+  </form>
+
+  <a href="#top" tabindex="3">Positive tabindex link</a>
+  <a href="#hidden" class="offscreen">Off-screen but tabbable</a>
+
+  <div class="spacer"></div>
+  <p><a href="/mid">Middle link</a></p>
+  <div class="spacer"></div>
+  <p><a href="/low">Link near the bottom that a fixed footer will cover</a></p>
+  <div class="spacer"></div>
+  <p><a href="/last">Very last link</a></p>
+</main>
+
+<div id="fixed-footer" class="fixed-footer">Fixed footer with plenty of text so it paints over content beneath it.</div>
+</body>
+</html>
