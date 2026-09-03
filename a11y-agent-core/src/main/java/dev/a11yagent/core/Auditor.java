@@ -20,6 +20,7 @@ import dev.a11yagent.core.wcag.Criterion;
 import dev.a11yagent.core.wcag.Wcag;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -90,6 +91,17 @@ public final class Auditor {
         PageAudit page = auditState("page", rules, null);
         return new AuditReport("check " + ruleOrCriterion, start, Instant.now(), config.targetVersion(), config.targetLevel(),
                 ruleIds(rules), List.of(page), List.of());
+    }
+
+    /**
+     * Runs a specific set of rules (by id) against the current page in a single shared context, so
+     * expensive artefacts such as the keyboard traversal and the accessibility tree are computed once.
+     * Unknown ids are ignored. Used by the benchmark runner, which must run exactly the rules mapped to
+     * the test case under evaluation.
+     */
+    public PageAudit checkRules(Collection<String> ruleIds, String name) {
+        List<Rule> rules = ruleIds.stream().map(Rules::pageRule).flatMap(Optional::stream).toList();
+        return auditState(name, rules, null);
     }
 
     /** Runs a journey: audits the landing page (if a start URL is set) and every step, then cross-step rules. */

@@ -52,13 +52,8 @@ final class CdpAccessibilityTree {
     private CdpAccessibilityTree() {
     }
 
-    static Optional<AxTree> fetch(Page page) {
-        CDPSession cdp;
-        try {
-            cdp = page.context().newCDPSession(page);
-        } catch (RuntimeException e) {
-            return Optional.empty(); // not Chromium
-        }
+    /** Uses the caller-owned CDP session (one per page, reused across audits). */
+    static Optional<AxTree> fetch(CDPSession cdp) {
         try {
             cdp.send("Accessibility.enable");
             JsonObject res = cdp.send("Accessibility.getFullAXTree");
@@ -66,15 +61,17 @@ final class CdpAccessibilityTree {
             for (JsonElement e : res.getAsJsonArray("nodes")) {
                 nodes.add(toNode(e.getAsJsonObject()));
             }
-            // Session stays open for lazy node resolution; closed with the page.
             return Optional.of(new AxTree(nodes, n -> resolve(cdp, n)));
         } catch (RuntimeException e) {
-            try {
-                cdp.detach();
-            } catch (RuntimeException ignored) {
-                // best effort
-            }
             return Optional.empty();
+        }
+    }
+
+    static Optional<CDPSession> session(Page page) {
+        try {
+            return Optional.of(page.context().newCDPSession(page));
+        } catch (RuntimeException e) {
+            return Optional.empty(); // not Chromium
         }
     }
 

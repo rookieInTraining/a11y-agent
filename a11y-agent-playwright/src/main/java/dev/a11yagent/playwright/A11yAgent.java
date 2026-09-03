@@ -32,13 +32,20 @@ import java.util.function.Consumer;
 public final class A11yAgent {
 
     private final Page page;
+    private final PlaywrightDriver driver;
     private final Auditor auditor;
     private final A11yConfig config;
 
     private A11yAgent(Page page, A11yConfig config) {
         this.page = page;
         this.config = config;
-        this.auditor = new Auditor(new PlaywrightDriver(page), config);
+        this.driver = new PlaywrightDriver(page);
+        this.auditor = new Auditor(driver, config);
+    }
+
+    /** The driver wrapping the page; useful to build several {@link Auditor}s sharing one DevTools session. */
+    public PlaywrightDriver driver() {
+        return driver;
     }
 
     public static A11yAgent forPage(Page page) {
@@ -64,12 +71,12 @@ public final class A11yAgent {
 
     /** The browser accessibility tree of the current page (Chromium), for custom screen-reader-oriented assertions. */
     public java.util.Optional<dev.a11yagent.core.ax.AxTree> accessibilityTree() {
-        return new PlaywrightDriver(page).accessibilityTree();
+        return driver.accessibilityTree();
     }
 
     /** Text rendering of the exposed accessibility tree: roles, names and states. */
     public String accessibilityTreeText() {
-        return new PlaywrightDriver(page).renderAccessibilityTree(40);
+        return driver.renderAccessibilityTree(40);
     }
 
     /** Audits the page currently loaded in the Playwright {@link Page}. */
