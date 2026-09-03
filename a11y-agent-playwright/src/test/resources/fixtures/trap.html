@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Keyboard trap fixture</title></head>
+<body>
+<a href="/first">First link</a>
+<div>
+  <input id="trapped" aria-label="Trapped field" onkeydown="if (event.key === 'Tab') { event.preventDefault(); }">
+</div>
+<a href="/last">Last link</a>
+</body>
+</html>

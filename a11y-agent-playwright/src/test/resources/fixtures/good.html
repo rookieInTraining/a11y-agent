@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Accessible fixture page</title>
+<style>
+  body { font: 16px/1.5 Arial, sans-serif; margin: 0; padding: 24px; max-width: 100%; }
+  a { color: #0645ad; text-decoration: underline; }
+  a:focus-visible, button:focus-visible, input:focus-visible { outline: 3px solid #005fcc; outline-offset: 2px; }
+  button { min-width: 44px; min-height: 44px; padding: 8px 16px; }
+  input { min-height: 44px; font-size: 16px; }
+  img { max-width: 100%; height: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Garden centre opening hours</h1>
+  <nav aria-label="Main">
+    <ul>
+      <li><a href="/plants">Plants</a></li>
+      <li><a href="/tools">Garden tools</a></li>
+      <li><a href="/contact">Contact us</a></li>
+    </ul>
+  </nav>
+</header>
+<main>
+  <p>We are open every day from 9am to 6pm. Read our <a href="/delivery">delivery policy</a> before ordering large items.</p>
+  <img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" width="200" height="120" alt="Rows of potted lavender in the greenhouse">
+  <h2>Newsletter</h2>
+  <form action="/subscribe" method="post">
+    <label for="email">Email address</label>
+    <input id="email" type="email" name="email" autocomplete="email">
+    <button type="submit">Subscribe to the newsletter</button>
+  </form>
+</main>
+<footer>
+  <p>Questions? <a href="/contact">Contact us</a>.</p>
+</footer>
+</body>
+</html>
