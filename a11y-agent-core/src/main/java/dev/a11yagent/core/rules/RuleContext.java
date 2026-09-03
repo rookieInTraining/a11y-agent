@@ -35,6 +35,11 @@ public final class RuleContext {
     public InPageEngine inPage() { return inPage; }
     public String stepName() { return stepName; }
 
+    /** Browser accessibility tree for this page state, fetched once and shared by the AX rules. */
+    public Optional<dev.a11yagent.core.ax.AxTree> axTree() {
+        return cached("ax-tree", () -> driver.accessibilityTree());
+    }
+
     /** Memoises expensive shared computations (e.g. the keyboard traversal) across rules. */
     @SuppressWarnings("unchecked")
     public <T> T cached(String key, Supplier<T> supplier) {

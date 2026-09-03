@@ -3,9 +3,11 @@ package dev.a11yagent.playwright;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.Clip;
 import com.microsoft.playwright.options.ViewportSize;
+import dev.a11yagent.core.ax.AxTree;
 import dev.a11yagent.core.driver.PageDriver;
 import dev.a11yagent.core.driver.Rect;
 import dev.a11yagent.core.driver.Viewport;
+import java.util.Optional;
 
 /** {@link PageDriver} backed by a Playwright {@link Page}. */
 public final class PlaywrightDriver implements PageDriver {
@@ -78,5 +80,15 @@ public final class PlaywrightDriver implements PageDriver {
     @Override
     public void waitMillis(long millis) {
         page.waitForTimeout(millis);
+    }
+
+    @Override
+    public Optional<AxTree> accessibilityTree() {
+        return CdpAccessibilityTree.fetch(page);
+    }
+
+    /** Human readable rendering of the exposed accessibility tree (roles, names, states). */
+    public String renderAccessibilityTree(int maxDepth) {
+        return accessibilityTree().map(t -> CdpAccessibilityTree.render(t, maxDepth)).orElse("(accessibility tree unavailable: not a Chromium page)");
     }
 }

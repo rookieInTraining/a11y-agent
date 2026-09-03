@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en-US-x-invalid-tag-toolong">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title></title>
+<style>
+  body { font: 16px/1.5 Arial, sans-serif; margin: 0; padding: 24px; }
+  .low { color: #999999; }               /* 2.85:1 on white */
+  .ok  { color: #333333; }
+  .scroll { height: 60px; overflow: auto; border: 1px solid #ccc; }
+  .scroll div { height: 300px; }
+  .fake-btn { display: inline-block; padding: 8px 12px; border: 1px solid #333; cursor: pointer; }
+</style>
+</head>
+<body>
+<!-- no <main>, header/footer landmarks nested in a div, two navs without names -->
+<div>
+  <header>
+    <nav><a href="/a">Alpha</a> <a href="/b">Beta</a></nav>
+    <nav><a href="/c">Gamma</a> <a href="/d">Delta</a></nav>
+    <div id="lang-picker" tabindex="0" aria-label="Language and currency" aria-live="assertive">EN / GBP</div>
+  </header>
+
+  <h1>Structure fixture</h1>
+  <h3>Skipped to level three</h3>
+  <h2></h2>
+
+  <p class="low">This paragraph has low contrast grey text on a white background.</p>
+  <p class="ok">This paragraph is fine.</p>
+  <p lang="xx-INVALID-999999999">Texte en langue inconnue.</p>
+
+  <img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" width="120" height="60">
+  <a href="/promo"><img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" width="40" height="40"></a>
+  <a href="/empty"></a>
+  <button></button>
+  <input type="text" name="unlabelled">
+
+  <div role="buton" class="fake-btn">Misspelled role</div>
+  <div role="checkbox" tabindex="0" class="fake-btn">Checkbox without aria-checked</div>
+  <div role="listitem">Orphan list item</div>
+  <span aria-labelledby="does-not-exist" aria-describedby="also-missing" aria-bogus="1">Broken references</span>
+  <div aria-hidden="true"><a href="/hidden">Hidden but focusable link</a></div>
+  <button aria-expanded="maybe">Bad boolean</button>
+  <a href="/outer">Outer link <button>Inner button</button></a>
+  <button aria-label="Save changes button">Save changes</button>
+  <a href="/instructions" aria-label="Airport transfer. Click here to access.">Airport transfer</a>
+
+  <label for="dup">Duplicate</label>
+  <input id="dup" type="text" autocomplete="mail">
+  <input id="dup" type="text">
+
+  <ul>
+    <li>Item one</li>
+    <div>Not an item</div>
+  </ul>
+
+  <table>
+    <tr><td>Alpha</td><td>1</td></tr>
+    <tr><td>Beta</td><td>2</td></tr>
+  </table>
+
+  <div class="scroll"><div>Tall content that scrolls but the region is not focusable.</div></div>
+
+  <iframe src="about:blank" tabindex="-1"></iframe>
+
+  <div id="custom" tabindex="0">Focusable generic div</div>
+
+  <footer><p>Footer inside a div wrapper</p></footer>
+</div>
+</body>
+</html>

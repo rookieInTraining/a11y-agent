@@ -1,5 +1,6 @@
 package dev.a11yagent.core.rules;
 
+import dev.a11yagent.core.ax.AxNode;
 import dev.a11yagent.core.journey.JourneyRule;
 import dev.a11yagent.core.journey.rules.ConsistentHelpRule;
 import dev.a11yagent.core.journey.rules.ConsistentIdentificationRule;
@@ -7,6 +8,9 @@ import dev.a11yagent.core.journey.rules.ConsistentNavigationRule;
 import dev.a11yagent.core.journey.rules.RedundantEntryRule;
 import dev.a11yagent.core.model.Impact;
 import dev.a11yagent.core.rules.ai.AltTextQualityRule;
+import dev.a11yagent.core.rules.ax.AxReconciledNameRule;
+import dev.a11yagent.core.rules.ax.FocusableWithoutRoleRule;
+import dev.a11yagent.core.rules.ax.NameQualityRule;
 import dev.a11yagent.core.rules.runtime.FocusNotObscuredRule;
 import dev.a11yagent.core.rules.runtime.FocusOrderRule;
 import dev.a11yagent.core.rules.runtime.FocusVisibleRule;
@@ -41,6 +45,34 @@ public final class Rules {
     }
 
     static {
+        // ---- DOM analysis baseline (what a linter checks), reconciled with the browser AX tree where it matters
+        add(new AxReconciledNameRule("image-alt", "Images, image inputs, image maps and role=img elements have a text alternative (DOM + browser accessibility tree).",
+                sc("1.1.1"), Impact.CRITICAL, n -> "image".equals(n.role()) || "img".equals(n.role()), "Image"));
+        add(new AxReconciledNameRule("control-name", "Links, buttons, form fields, custom controls and frames have a non-empty accessible name (DOM + browser accessibility tree).",
+                sc("4.1.2", "2.4.4", "1.3.1"), Impact.CRITICAL,
+                n -> AxNode.NAME_REQUIRED_ROLES.contains(n.role()) && !"image".equals(n.role()) && !"img".equals(n.role()) || "Iframe".equals(n.role()), "Control"));
+        add(new InPageRule("color-contrast", "Text has at least 4.5:1 contrast (3:1 for large text) against its composited background.", sc("1.4.3"), Impact.SERIOUS));
+        add(new InPageRule("color-contrast-enhanced", "Text has at least 7:1 contrast (4.5:1 for large text) (AAA).", sc("1.4.6"), Impact.MINOR));
+        add(new InPageRule("aria-validity", "ARIA roles, attributes, values, id references, required states and contexts are valid; presentational-role conflicts and aria-hidden focusable content are flagged.", sc("4.1.2"), Impact.SERIOUS));
+        add(new InPageRule("duplicate-id-aria", "ids referenced by ARIA/label attributes are unique.", sc("4.1.2"), Impact.SERIOUS));
+        add(new InPageRule("nested-interactive", "Interactive elements do not contain other interactive elements.", sc("4.1.2"), Impact.SERIOUS));
+        add(new InPageRule("landmarks", "Exactly one main; banner/contentinfo top-level and unique; repeated landmarks distinguished by name; content contained in landmarks.", sc("1.3.1"), Impact.MODERATE));
+        add(new InPageRule("bypass-blocks", "A skip link, landmarks or heading structure lets users bypass repeated blocks.", sc("2.4.1"), Impact.SERIOUS));
+        add(new InPageRule("heading-structure", "Headings are non-empty, include a single h1 and do not skip levels.", sc("1.3.1"), Impact.MODERATE));
+        add(new InPageRule("list-structure", "Lists contain only list items; list items live in lists; definition lists are well-formed.", sc("1.3.1"), Impact.MODERATE));
+        add(new InPageRule("table-headers", "Data tables have header cells and valid headers references.", sc("1.3.1"), Impact.SERIOUS));
+        add(new InPageRule("html-lang", "The page declares a valid default language.", sc("3.1.1"), Impact.SERIOUS));
+        add(new InPageRule("lang-attr-valid", "lang attributes on parts of the page are valid BCP 47 tags.", sc("3.1.2"), Impact.MODERATE));
+        add(new InPageRule("document-title", "The page has a descriptive title.", sc("2.4.2"), Impact.SERIOUS));
+        add(new InPageRule("meta-viewport-zoom", "The viewport meta tag does not disable or cap zooming.", sc("1.4.4"), Impact.CRITICAL));
+        add(new InPageRule("scrollable-region-focusable", "Scrollable regions are reachable by keyboard.", sc("2.1.1"), Impact.SERIOUS));
+        add(new InPageRule("live-regions", "Live regions are scoped to status messages and not assertive by default.", sc("4.1.3"), Impact.MODERATE));
+        add(new InPageRule("autocomplete-valid", "autocomplete attributes use valid tokens.", sc("1.3.5"), Impact.SERIOUS));
+        // ---- browser accessibility tree (screen reader view)
+        add(new FocusableWithoutRoleRule());
+        add(new NameQualityRule());
+
+        // ---- beyond-linter coverage
         // Perceivable
         add(new AltTextQualityRule());
         add(new InPageRule("use-of-color-links", "Inline links in text are distinguished by more than colour.", sc("1.4.1"), Impact.SERIOUS));

@@ -849,6 +849,599 @@
     return out;
   };
 
+  /* ------------------------------------------------ DOM analysis (baseline) */
+
+  var VALID_ROLES = ['alert', 'alertdialog', 'application', 'article', 'banner', 'blockquote', 'button', 'caption', 'cell', 'checkbox', 'code', 'columnheader', 'combobox', 'comment', 'complementary', 'contentinfo', 'definition', 'deletion', 'dialog', 'directory', 'document', 'emphasis', 'feed', 'figure', 'form', 'generic', 'grid', 'gridcell', 'group', 'heading', 'img', 'image', 'insertion', 'link', 'list', 'listbox', 'listitem', 'log', 'main', 'mark', 'marquee', 'math', 'menu', 'menubar', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'meter', 'navigation', 'none', 'note', 'option', 'paragraph', 'presentation', 'progressbar', 'radio', 'radiogroup', 'region', 'row', 'rowgroup', 'rowheader', 'scrollbar', 'search', 'searchbox', 'separator', 'slider', 'spinbutton', 'status', 'strong', 'subscript', 'suggestion', 'superscript', 'switch', 'tab', 'table', 'tablist', 'tabpanel', 'term', 'textbox', 'time', 'timer', 'toolbar', 'tooltip', 'tree', 'treegrid', 'treeitem'];
+  var VALID_ARIA = ['aria-activedescendant', 'aria-atomic', 'aria-autocomplete', 'aria-braillelabel', 'aria-brailleroledescription', 'aria-busy', 'aria-checked', 'aria-colcount', 'aria-colindex', 'aria-colindextext', 'aria-colspan', 'aria-controls', 'aria-current', 'aria-describedby', 'aria-description', 'aria-details', 'aria-disabled', 'aria-dropeffect', 'aria-errormessage', 'aria-expanded', 'aria-flowto', 'aria-grabbed', 'aria-haspopup', 'aria-hidden', 'aria-invalid', 'aria-keyshortcuts', 'aria-label', 'aria-labelledby', 'aria-level', 'aria-live', 'aria-modal', 'aria-multiline', 'aria-multiselectable', 'aria-orientation', 'aria-owns', 'aria-placeholder', 'aria-posinset', 'aria-pressed', 'aria-readonly', 'aria-relevant', 'aria-required', 'aria-roledescription', 'aria-rowcount', 'aria-rowindex', 'aria-rowindextext', 'aria-rowspan', 'aria-selected', 'aria-setsize', 'aria-sort', 'aria-valuemax', 'aria-valuemin', 'aria-valuenow', 'aria-valuetext'];
+  var NAME_PROHIBITED_ROLES = ['caption', 'code', 'deletion', 'emphasis', 'generic', 'insertion', 'mark', 'none', 'paragraph', 'presentation', 'strong', 'subscript', 'superscript', 'suggestion', 'term', 'time'];
+  var GENERIC_TAGS = ['DIV', 'SPAN', 'P', 'CODE', 'EM', 'STRONG', 'SUB', 'SUP', 'TIME', 'DEL', 'INS', 'B', 'I', 'U', 'SMALL', 'S', 'MARK', 'BDI', 'BDO', 'Q', 'PRE', 'BLOCKQUOTE', 'HR', 'BR', 'WBR'];
+  var IDREF_ATTRS = ['aria-labelledby', 'aria-describedby', 'aria-controls', 'aria-owns', 'aria-flowto', 'aria-details', 'aria-errormessage', 'aria-activedescendant'];
+  var ID_ATTRS_STRICT = { 'aria-labelledby': 1, 'aria-describedby': 1, 'aria-activedescendant': 1, 'aria-errormessage': 1, 'aria-details': 1, 'aria-flowto': 1 };
+  var REQUIRED_ATTRS = { checkbox: ['aria-checked'], menuitemcheckbox: ['aria-checked'], switch: ['aria-checked'], radio: ['aria-checked'], menuitemradio: ['aria-checked'], combobox: ['aria-expanded'], heading: ['aria-level'], meter: ['aria-valuenow'], scrollbar: ['aria-controls', 'aria-valuenow'], slider: ['aria-valuenow'] };
+  var REQUIRED_CONTEXT = { listitem: ['list', 'directory'], option: ['listbox', 'group'], tab: ['tablist'], menuitem: ['menu', 'menubar', 'group'], menuitemcheckbox: ['menu', 'menubar', 'group'], menuitemradio: ['menu', 'menubar', 'group'], row: ['table', 'grid', 'treegrid', 'rowgroup'], rowgroup: ['table', 'grid', 'treegrid'], cell: ['row'], gridcell: ['row'], columnheader: ['row'], rowheader: ['row'], treeitem: ['tree', 'group'] };
+  var IMPLICIT_ROLES = { UL: 'list', OL: 'list', MENU: 'list', LI: 'listitem', TABLE: 'table', TBODY: 'rowgroup', THEAD: 'rowgroup', TFOOT: 'rowgroup', TR: 'row', TD: 'cell', TH: 'columnheader', SELECT: 'listbox', DATALIST: 'listbox', OPTION: 'option', NAV: 'navigation', MAIN: 'main', HEADER: 'banner', FOOTER: 'contentinfo', ASIDE: 'complementary', FORM: 'form', BUTTON: 'button', A: 'link', IMG: 'img', H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', H5: 'heading', H6: 'heading', DIALOG: 'dialog', ARTICLE: 'article', SECTION: 'region', TEXTAREA: 'textbox', PROGRESS: 'progressbar', METER: 'meter', HR: 'separator' };
+  var BOOLEAN_ATTRS = { 'aria-hidden': ['true', 'false'], 'aria-required': ['true', 'false'], 'aria-disabled': ['true', 'false'], 'aria-readonly': ['true', 'false'], 'aria-multiline': ['true', 'false'], 'aria-multiselectable': ['true', 'false'], 'aria-modal': ['true', 'false'], 'aria-atomic': ['true', 'false'], 'aria-busy': ['true', 'false'], 'aria-expanded': ['true', 'false', 'undefined'], 'aria-pressed': ['true', 'false', 'mixed', 'undefined'], 'aria-checked': ['true', 'false', 'mixed', 'undefined'], 'aria-selected': ['true', 'false', 'undefined'], 'aria-live': ['off', 'polite', 'assertive'], 'aria-haspopup': ['true', 'false', 'menu', 'listbox', 'tree', 'grid', 'dialog'], 'aria-orientation': ['horizontal', 'vertical', 'undefined'], 'aria-sort': ['none', 'ascending', 'descending', 'other'], 'aria-autocomplete': ['none', 'inline', 'list', 'both'], 'aria-invalid': ['true', 'false', 'grammar', 'spelling'], 'aria-current': ['page', 'step', 'location', 'date', 'time', 'true', 'false'] };
+
+  function explicitRole(el) {
+    var r = lower(el.getAttribute('role'));
+    if (!r) return null;
+    var tokens = r.split(/\s+/);
+    for (var i = 0; i < tokens.length; i++) if (VALID_ROLES.indexOf(tokens[i]) >= 0) return tokens[i];
+    return tokens[0];
+  }
+
+  function computedRole(el) {
+    var r = explicitRole(el);
+    if (r && VALID_ROLES.indexOf(r) >= 0) return r;
+    if (el.nodeName === 'INPUT') {
+      var t = lower(el.type);
+      if (t === 'checkbox' || t === 'radio') return t;
+      if (t === 'range') return 'slider';
+      if (t === 'number') return 'spinbutton';
+      if (t === 'button' || t === 'submit' || t === 'reset' || t === 'image') return 'button';
+      if (t === 'search') return 'searchbox';
+      if (t === 'hidden') return null;
+      return el.hasAttribute('list') ? 'combobox' : 'textbox';
+    }
+    if (el.nodeName === 'A' && !el.hasAttribute('href')) return 'generic';
+    if (el.nodeName === 'SECTION' && !el.hasAttribute('aria-label') && !el.hasAttribute('aria-labelledby')) return 'generic';
+    if ((el.nodeName === 'HEADER' || el.nodeName === 'FOOTER') && el.closest('article, aside, main, nav, section')) return 'generic';
+    if (el.nodeName === 'FORM' && !el.hasAttribute('aria-label') && !el.hasAttribute('aria-labelledby') && !el.hasAttribute('name')) return 'form';
+    return IMPLICIT_ROLES[el.nodeName] || (GENERIC_TAGS.indexOf(el.nodeName) >= 0 ? 'generic' : null);
+  }
+
+  function isValidLang(v) {
+    return /^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$/.test(norm(v));
+  }
+
+  /* --- colour contrast --------------------------------------------------- */
+
+  function relLuminance(c) {
+    function ch(v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
+    return 0.2126 * ch(c.r) + 0.7152 * ch(c.g) + 0.0722 * ch(c.b);
+  }
+
+  function contrastRatio(a, b) {
+    var l1 = relLuminance(a), l2 = relLuminance(b);
+    var hi = Math.max(l1, l2), lo = Math.min(l1, l2);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+
+  function over(top, bottom) {
+    var a = top.a === undefined ? 1 : top.a;
+    return { r: top.r * a + bottom.r * (1 - a), g: top.g * a + bottom.g * (1 - a), b: top.b * a + bottom.b * (1 - a), a: 1 };
+  }
+
+  function hex(c) {
+    function h(v) { var s = Math.round(v).toString(16); return s.length < 2 ? '0' + s : s; }
+    return '#' + h(c.r) + h(c.g) + h(c.b);
+  }
+
+  /* Walks up from el compositing background colours; bails out when a background image, gradient, opacity or filter makes the result unknowable. */
+  function effectiveBackground(el) {
+    var layers = [];
+    var node = el;
+    while (node && node.nodeType === 1) {
+      var cs = style(node);
+      if (!cs) break;
+      if (cs.backgroundImage && cs.backgroundImage !== 'none') return { unknown: 'background-image on ' + node.nodeName.toLowerCase() };
+      if (parseFloat(cs.opacity) < 1 && node !== el) return { unknown: 'opacity on ancestor' };
+      if (cs.filter && cs.filter !== 'none' || cs.mixBlendMode && cs.mixBlendMode !== 'normal') return { unknown: 'filter/blend-mode' };
+      var bg = parseColor(cs.backgroundColor);
+      if (bg && bg.a > 0) {
+        layers.push(bg);
+        if (bg.a >= 1) break;
+      }
+      node = node.parentElement;
+    }
+    var result = { r: 255, g: 255, b: 255, a: 1 };
+    for (var i = layers.length - 1; i >= 0; i--) result = over(layers[i], result);
+    return { color: result };
+  }
+
+  function firstTextPoint(el) {
+    for (var i = 0; i < el.childNodes.length; i++) {
+      var n = el.childNodes[i];
+      if (n.nodeType !== 3 || !norm(n.nodeValue)) continue;
+      var range = document.createRange();
+      range.selectNodeContents(n);
+      var rects = range.getClientRects();
+      if (rects.length) {
+        var r = rects[0];
+        return { x: r.left + Math.min(r.width / 2, 4), y: r.top + r.height / 2, height: r.height };
+      }
+    }
+    return null;
+  }
+
+  function colorContrast(levelAAA) {
+    var out = [];
+    var all = document.querySelectorAll('body *');
+    var checked = 0, unknown = 0;
+    var seenKeys = {};
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (!hasOwnText(el) || !isVisible(el)) continue;
+      if (el.nodeName === 'SCRIPT' || el.nodeName === 'STYLE' || el.nodeName === 'NOSCRIPT' || el.nodeName === 'OPTION') continue;
+      if (el.closest('[disabled], [aria-disabled="true"], option, select')) continue;
+      var cs = style(el);
+      if (!cs) continue;
+      var fg = parseColor(cs.color);
+      if (!fg || fg.a === 0) continue;
+      var fontSize = parseFloat(cs.fontSize);
+      if (!fontSize || fontSize < 1) continue;
+      if (cs.webkitTextFillColor && parseColor(cs.webkitTextFillColor) && cs.webkitTextFillColor !== cs.color) fg = parseColor(cs.webkitTextFillColor);
+      if (cs.textShadow && cs.textShadow !== 'none') { unknown++; continue; }
+      var bgInfo = effectiveBackground(el);
+      if (bgInfo.unknown) { unknown++; continue; }
+      var pt = firstTextPoint(el);
+      if (pt) {
+        if (pt.x < 0 || pt.y < 0 || pt.x >= innerWidth || pt.y >= innerHeight) { /* off-screen text: still measurable from styles */ }
+        else {
+          var top = document.elementFromPoint(pt.x, pt.y);
+          if (top && top !== el && !el.contains(top) && !top.contains(el)) { unknown++; continue; } // something paints over the text
+        }
+      }
+      var weight = parseInt(cs.fontWeight, 10) || (cs.fontWeight === 'bold' ? 700 : 400);
+      var large = fontSize >= 24 || (fontSize >= 18.66 && weight >= 700);
+      var required = levelAAA ? (large ? 4.5 : 7) : (large ? 3 : 4.5);
+      var fgFlat = fg.a < 1 ? over(fg, bgInfo.color) : fg;
+      var ratio = contrastRatio(fgFlat, bgInfo.color);
+      checked++;
+      var data = { ratio: Math.round(ratio * 100) / 100, required: required, foreground: hex(fgFlat), background: hex(bgInfo.color), fontSize: Math.round(fontSize * 10) / 10, fontWeight: weight, largeText: large, text: visibleText(el).slice(0, 80) };
+      if (ratio + 0.005 < required) {
+        var key = data.foreground + data.background + (large ? 'L' : 'S');
+        seenKeys[key] = (seenKeys[key] || 0) + 1;
+        if (seenKeys[key] <= 8) {
+          out.push(finding('failed', el, 'Text contrast ' + data.ratio + ':1 is below the ' + required + ':1 ' + (levelAAA ? 'AAA' : 'AA') + ' minimum (' + data.foreground + ' on ' + data.background + ', ' + data.fontSize + 'px' + (large ? ' large text' : '') + ').', data));
+        }
+      }
+    }
+    var suppressed = 0;
+    Object.keys(seenKeys).forEach(function (k) { if (seenKeys[k] > 8) suppressed += seenKeys[k] - 8; });
+    if (out.length === 0 && checked > 0) out.push(finding('passed', null, checked + ' text element(s) meet the ' + (levelAAA ? 'AAA' : 'AA') + ' contrast minimum.' + (unknown ? ' ' + unknown + ' skipped (background image, opacity, shadow or overlap).' : ''), { checked: checked, skipped: unknown }));
+    else if (suppressed > 0) out.push(finding('failed', null, suppressed + ' further element(s) with the same failing colour pairs not listed individually.', { suppressed: suppressed, checked: checked, skipped: unknown }));
+    if (out.length && unknown > 0 && out[out.length - 1].outcome !== 'passed') out.push(finding('cantTell', null, unknown + ' text element(s) could not be measured (background image/gradient, opacity, text-shadow or overlapping content).', { skipped: unknown }));
+    return out;
+  }
+
+  rules['color-contrast'] = function () { return colorContrast(false); };
+  rules['color-contrast-enhanced'] = function () { return colorContrast(true); };
+
+  /* --- text alternatives and names --------------------------------------- */
+
+  rules['image-alt'] = function () {
+    var out = [];
+    document.querySelectorAll('img, input[type="image"], area[href], svg, [role="img"], [role="image"]').forEach(function (el) {
+      if (isHiddenFromAT(el)) return;
+      var role = explicitRole(el);
+      if (role === 'presentation' || role === 'none') {
+        if (el.nodeName === 'IMG' && (el.hasAttribute('tabindex') || el.hasAttribute('aria-label'))) out.push(finding('failed', el, 'Image has role="' + role + '" but is focusable or labelled; browsers ignore the presentational role (conflict), so it needs a real text alternative.', {}));
+        return;
+      }
+      var tag = el.nodeName.toUpperCase();
+      if (tag === 'SVG' && !(role === 'img' || role === 'image')) {
+        // inline svg without role: only flag if it is the sole content of a control
+        var ctl = el.closest('a[href], button, [role="button"], [role="link"]');
+        if (ctl && !norm(accessibleName(ctl)) && isVisible(el)) out.push(finding('failed', ctl, 'Control contains only an inline <svg> without a text alternative (add <title>, aria-label or role="img" with a name).', {}));
+        return;
+      }
+      if (!isVisible(el) && tag !== 'AREA') return;
+      var hasAlt = el.hasAttribute('alt');
+      var name = accessibleName(el);
+      var data = { alt: el.getAttribute('alt'), src: (el.currentSrc || el.getAttribute('src') || '').slice(0, 200), width: Math.round(rect(el).width), height: Math.round(rect(el).height) };
+      if (tag === 'IMG' || tag === 'AREA' || (tag === 'INPUT')) {
+        if (hasAlt) { out.push(finding('passed', el, 'Has alt attribute.', data)); return; }
+        if (name) { out.push(finding('passed', el, 'Named via aria-label/aria-labelledby/title.', data)); return; }
+        out.push(finding('failed', el, '<' + tag.toLowerCase() + (tag === 'INPUT' ? ' type="image"' : '') + '> has no alt attribute and no other text alternative. Add alt="…" (or alt="" if purely decorative).', data));
+        return;
+      }
+      if (name) out.push(finding('passed', el, 'role="img" element is named.', data));
+      else out.push(finding('failed', el, 'Element with role="img" has no accessible name.', data));
+    });
+    return out;
+  };
+
+  rules['control-name'] = function () {
+    var out = [];
+    var sel = 'a[href], area[href], button, input:not([type="hidden"]), select, textarea, summary, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="textbox"], [role="searchbox"], [role="combobox"], [role="listbox"], [role="slider"], [role="spinbutton"], [role="option"], [role="treeitem"], [role="dialog"], [role="alertdialog"], [role="progressbar"], iframe';
+    document.querySelectorAll(sel).forEach(function (el) {
+      if (isHiddenFromAT(el)) return;
+      var visible = isVisible(el);
+      var tabbable = isTabbable(el);
+      if (!visible && !tabbable) return;
+      var name = norm(accessibleName(el));
+      var role = computedRole(el) || el.nodeName.toLowerCase();
+      if (el.nodeName === 'IFRAME') {
+        var t = norm(el.getAttribute('title') || el.getAttribute('aria-label') || '');
+        if (!t) out.push(finding('failed', el, '<iframe> has no title; screen reader users cannot tell what the frame contains.', { src: (el.getAttribute('src') || '').slice(0, 200) }));
+        else out.push(finding('passed', el, 'Frame is titled "' + t + '".', {}));
+        return;
+      }
+      if (el.nodeName === 'INPUT' && (lower(el.type) === 'submit' || lower(el.type) === 'reset') && name) { out.push(finding('passed', el, 'Named.', { name: name })); return; }
+      var data = { role: role, name: name, tag: el.nodeName.toLowerCase(), visible: visible };
+      if (name) { out.push(finding('passed', el, 'Accessible name: "' + name.slice(0, 80) + '".', data)); return; }
+      var what = el.nodeName === 'A' ? 'Link' : el.nodeName === 'BUTTON' ? 'Button' : (el.nodeName === 'INPUT' || el.nodeName === 'SELECT' || el.nodeName === 'TEXTAREA') ? 'Form field' : 'Control (role=' + role + ')';
+      var hint = el.nodeName === 'A' || el.nodeName === 'BUTTON' ? 'Add visible text, an aria-label, or alt text on the contained image.' : (el.nodeName === 'INPUT' || el.nodeName === 'SELECT' || el.nodeName === 'TEXTAREA') ? 'Associate a <label for>, wrap it in a <label>, or use aria-label/aria-labelledby.' : 'Provide aria-label or aria-labelledby.';
+      out.push(finding('failed', el, what + ' has no accessible name' + (visible ? '' : ' and is in the tab order while visually hidden') + '. ' + hint, data));
+    });
+    return out;
+  };
+
+  /* --- ARIA validity ------------------------------------------------------ */
+
+  rules['aria-validity'] = function () {
+    var out = [];
+    var all = document.querySelectorAll('*');
+    var checked = 0;
+    all.forEach(function (el) {
+      if (el.nodeName === 'SCRIPT' || el.nodeName === 'STYLE' || el.nodeName === 'TEMPLATE') return;
+      var roleAttr = el.getAttribute('role');
+      var ariaAttrs = Array.prototype.filter.call(el.attributes, function (a) { return a.name.indexOf('aria-') === 0; });
+      if (roleAttr === null && ariaAttrs.length === 0) return;
+      checked++;
+      var role = explicitRole(el);
+      if (roleAttr !== null) {
+        if (!role || VALID_ROLES.indexOf(role) < 0) {
+          out.push(finding('failed', el, 'role="' + roleAttr + '" is not a valid WAI-ARIA role; assistive technology will fall back to the native semantics.', { role: roleAttr }));
+        } else if (roleAttr.trim().split(/\s+/).length > 1 && VALID_ROLES.indexOf(roleAttr.trim().split(/\s+/)[0]) < 0) {
+          out.push(finding('needsReview', el, 'role="' + roleAttr + '" relies on fallback role tokens; the first token is invalid.', { role: roleAttr }));
+        }
+        if ((role === 'presentation' || role === 'none') && (isFocusable(el) || ariaAttrs.some(function (a) { return a.name !== 'aria-hidden'; }))) {
+          out.push(finding('failed', el, 'role="' + role + '" on a focusable or ARIA-labelled element is ignored by browsers (presentational role conflict); the element keeps its native role.', { role: role }));
+        }
+        var req = REQUIRED_ATTRS[role];
+        if (req && !(el.nodeName === 'INPUT' || el.nodeName === 'SELECT' || /^H[1-6]$/.test(el.nodeName) || el.nodeName === 'METER' || el.nodeName === 'PROGRESS')) {
+          var missing = req.filter(function (a) { return !el.hasAttribute(a); });
+          if (role === 'combobox' && el.nodeName === 'INPUT') missing = [];
+          if (missing.length) out.push(finding('failed', el, 'role="' + role + '" requires ' + missing.join(', ') + ' so that assistive technology can report its state.', { role: role, missing: missing }));
+        }
+        var ctx = REQUIRED_CONTEXT[role];
+        if (ctx) {
+          var p = el.parentElement, ok = false, hops = 0;
+          while (p && p !== document.body && hops++ < 6) {
+            var pr = explicitRole(p) || IMPLICIT_ROLES[p.nodeName] || null;
+            if (pr === 'presentation' || pr === 'none' || pr === 'generic' || pr === null) { p = p.parentElement; continue; }
+            ok = ctx.indexOf(pr) >= 0 || (pr === 'group' && ctx.indexOf('group') >= 0);
+            if (!ok && (pr === 'rowgroup' && ctx.indexOf('table') >= 0)) ok = true;
+            break;
+          }
+          if (!ok) out.push(finding('failed', el, 'role="' + role + '" must be contained in an element with role ' + ctx.join(' or ') + '.', { role: role, requiredContext: ctx }));
+        }
+      }
+      var effRole = role && VALID_ROLES.indexOf(role) >= 0 ? role : computedRole(el);
+      ariaAttrs.forEach(function (a) {
+        var an = a.name.toLowerCase();
+        if (VALID_ARIA.indexOf(an) < 0) {
+          out.push(finding('failed', el, a.name + ' is not a valid WAI-ARIA attribute.', { attribute: a.name }));
+          return;
+        }
+        var allowed = BOOLEAN_ATTRS[an];
+        if (allowed && allowed.indexOf(lower(a.value)) < 0) {
+          out.push(finding('failed', el, a.name + '="' + a.value + '" is not an allowed value (' + allowed.join(' | ') + ').', { attribute: a.name, value: a.value }));
+        }
+        if (an === 'aria-level' && !(parseInt(a.value, 10) >= 1)) out.push(finding('failed', el, 'aria-level must be an integer of 1 or more.', { value: a.value }));
+        if (IDREF_ATTRS.indexOf(an) >= 0) {
+          var missingIds = a.value.split(/\s+/).filter(function (id) { return id && !document.getElementById(id); });
+          if (missingIds.length) {
+            var strict = ID_ATTRS_STRICT[an] || (an === 'aria-controls' && lower(el.getAttribute('aria-expanded')) !== 'false');
+            out.push(finding(strict ? 'failed' : 'needsReview', el, a.name + ' references id(s) that do not exist: ' + missingIds.join(', ') + '.', { attribute: a.name, missing: missingIds }));
+          }
+        }
+        if ((an === 'aria-label' || an === 'aria-labelledby') && effRole && NAME_PROHIBITED_ROLES.indexOf(effRole) >= 0 && norm(a.value)) {
+          out.push(finding('failed', el, a.name + ' is prohibited on <' + el.nodeName.toLowerCase() + '> with role "' + effRole + '"; screen readers ignore or misreport it. Give the element an appropriate role (e.g. group, region, img) or move the label to a real control.', { role: effRole, attribute: an }));
+        }
+      });
+      if (lower(el.getAttribute('aria-hidden')) === 'true') {
+        if (el === document.body || el === document.documentElement) out.push(finding('failed', el, 'aria-hidden="true" on <' + el.nodeName.toLowerCase() + '> hides the entire page from assistive technology.', {}));
+        else {
+          var focusables = Array.prototype.filter.call(el.querySelectorAll('a[href], button, input, select, textarea, summary, [tabindex]'), isTabbable);
+          if (isTabbable(el)) focusables.unshift(el);
+          if (focusables.length) out.push(finding('failed', el, 'aria-hidden="true" subtree contains ' + focusables.length + ' keyboard-focusable element(s) (e.g. ' + cssPath(focusables[0]) + '). Screen reader users land on content that is not announced.', { focusable: focusables.slice(0, 5).map(cssPath) }));
+        }
+      }
+    });
+    if (out.length === 0 && checked > 0) out.push(finding('passed', null, checked + ' element(s) with ARIA attributes are valid.', { checked: checked }));
+    return out;
+  };
+
+  rules['duplicate-id-aria'] = function () {
+    var out = [];
+    var referenced = {};
+    document.querySelectorAll('[aria-labelledby], [aria-describedby], [aria-controls], [aria-owns], [aria-activedescendant], [aria-errormessage], [aria-details], [aria-flowto], label[for], [list], [headers], [form]').forEach(function (el) {
+      IDREF_ATTRS.concat(['for', 'list', 'headers', 'form']).forEach(function (a) {
+        var v = el.getAttribute(a);
+        if (v) v.split(/\s+/).forEach(function (id) { if (id) referenced[id] = 1; });
+      });
+    });
+    Object.keys(referenced).forEach(function (id) {
+      var els = document.querySelectorAll('[id="' + esc(id) + '"]');
+      if (els.length > 1) out.push(finding('failed', els[1], 'id="' + id + '" is used ' + els.length + ' times and is referenced by ARIA/label attributes; the association resolves to the first element only.', { id: id, count: els.length }));
+    });
+    return out;
+  };
+
+  rules['nested-interactive'] = function () {
+    var out = [];
+    var sel = 'a[href], button, input:not([type="hidden"]), select, textarea, summary, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"], [role="menuitem"], [role="option"], [role="textbox"], [role="combobox"], [role="slider"]';
+    document.querySelectorAll(sel).forEach(function (el) {
+      if (!isVisible(el)) return;
+      var inner = Array.prototype.filter.call(el.querySelectorAll(sel), isVisible);
+      if (inner.length) out.push(finding('failed', el, '<' + el.nodeName.toLowerCase() + '> is interactive and contains ' + inner.length + ' other interactive element(s) (e.g. ' + cssPath(inner[0]) + '). Nested controls are announced and focused unpredictably.', { inner: inner.slice(0, 3).map(cssPath) }));
+    });
+    return out;
+  };
+
+  /* --- structure: landmarks, headings, lists, tables, language, title ---- */
+
+  /* Landmarks are named only from author-provided labels, never from content. */
+  function landmarkName(el) {
+    var lb = el.getAttribute('aria-labelledby');
+    if (lb) {
+      var t = norm(lb.split(/\s+/).map(function (id) { var ref = document.getElementById(id); return ref ? textFromSubtree(ref, 0) : ''; }).join(' '));
+      if (t) return t;
+    }
+    return norm(el.getAttribute('aria-label') || el.getAttribute('title') || '');
+  }
+
+  function landmarkRole(el) {
+    var r = explicitRole(el);
+    if (r && ['banner', 'complementary', 'contentinfo', 'form', 'main', 'navigation', 'region', 'search'].indexOf(r) >= 0) {
+      if ((r === 'region' || r === 'form') && !landmarkName(el)) return null;
+      return r;
+    }
+    if (r) return null;
+    var cr = computedRole(el);
+    if (cr === 'form' && !landmarkName(el)) return null;
+    return ['banner', 'complementary', 'contentinfo', 'form', 'main', 'navigation', 'region'].indexOf(cr) >= 0 ? cr : null;
+  }
+
+  rules['landmarks'] = function () {
+    var out = [];
+    var landmarks = [];
+    document.querySelectorAll('main, header, footer, nav, aside, section, form, [role]').forEach(function (el) {
+      if (isHiddenFromAT(el)) return;
+      var r = landmarkRole(el);
+      if (r) landmarks.push({ el: el, role: r, name: lower(landmarkName(el)) });
+    });
+    var mains = landmarks.filter(function (l) { return l.role === 'main'; });
+    if (mains.length === 0) out.push(finding('needsReview', null, 'No <main> landmark. Screen reader users cannot jump to the primary content.', {}));
+    if (mains.length > 1) out.push(finding('failed', mains[1].el, mains.length + ' main landmarks; a page must expose exactly one.', { count: mains.length }));
+    ['banner', 'contentinfo'].forEach(function (role) {
+      var list = landmarks.filter(function (l) { return l.role === role; });
+      if (list.length > 1) out.push(finding('failed', list[1].el, list.length + ' ' + role + ' landmarks; only one is allowed per page.', { count: list.length }));
+      list.forEach(function (l) {
+        var parentLandmark = landmarks.find(function (o) { return o.el !== l.el && o.el.contains(l.el); });
+        if (parentLandmark) out.push(finding('failed', l.el, role + ' landmark is nested inside a ' + parentLandmark.role + ' landmark; it must be top level.', { parent: cssPath(parentLandmark.el) }));
+      });
+    });
+    ['navigation', 'complementary', 'region', 'form', 'search'].forEach(function (role) {
+      var list = landmarks.filter(function (l) { return l.role === role; });
+      if (list.length < 2) return;
+      var names = {};
+      list.forEach(function (l) { names[l.name] = (names[l.name] || 0) + 1; });
+      Object.keys(names).forEach(function (n) {
+        if (names[n] > 1) {
+          var sample = list.filter(function (l) { return l.name === n; })[1];
+          out.push(finding('failed', sample.el, names[n] + ' ' + role + ' landmarks ' + (n ? 'share the name "' + n + '"' : 'have no name') + '; give each a unique aria-label so they can be distinguished in landmark lists.', { role: role, name: n, count: names[n] }));
+        }
+      });
+    });
+    // content outside landmarks
+    if (landmarks.length) {
+      var outside = [];
+      Array.prototype.forEach.call(document.body.children, function (child) {
+        walkOutside(child, outside, landmarks, 0);
+      });
+      if (outside.length) {
+        var chars = outside.reduce(function (n, e) { return n + visibleText(e).length; }, 0);
+        out.push(finding('needsReview', outside[0], outside.length + ' block(s) of content (' + chars + ' characters) sit outside any landmark, e.g. ' + cssPath(outside[0]) + '. Screen reader landmark navigation skips them.', { blocks: outside.slice(0, 5).map(cssPath), characters: chars }));
+      }
+    }
+    if (out.length === 0) out.push(finding('passed', null, landmarks.length + ' landmark(s) with a single main, unique names and no nesting violations.', { landmarks: landmarks.map(function (l) { return l.role + (l.name ? '[' + l.name + ']' : ''); }) }));
+    return out;
+  };
+
+  function walkOutside(el, acc, landmarks, depth) {
+    if (depth > 6 || acc.length > 30 || !isVisible(el) || isHiddenFromAT(el)) return;
+    if (el.nodeName === 'SCRIPT' || el.nodeName === 'STYLE') return;
+    if (landmarks.some(function (l) { return l.el === el; })) return;
+    if (landmarks.some(function (l) { return el.contains(l.el); })) {
+      // mixed container: recurse
+      Array.prototype.forEach.call(el.children, function (c) { walkOutside(c, acc, landmarks, depth + 1); });
+      if (hasOwnText(el) && visibleText(el).length > 20) acc.push(el);
+      return;
+    }
+    var t = visibleText(el);
+    if (t.length >= 20 || el.querySelector('a[href], button, input, img')) acc.push(el);
+  }
+
+  rules['bypass-blocks'] = function () {
+    var out = [];
+    var tabs = tabbables();
+    var skip = null;
+    for (var i = 0; i < Math.min(5, tabs.length); i++) {
+      var t = tabs[i];
+      if (t.nodeName === 'A') {
+        var href = t.getAttribute('href') || '';
+        var hash = href.indexOf('#') >= 0 ? href.slice(href.indexOf('#') + 1) : '';
+        if (hash && (document.getElementById(hash) || document.getElementsByName(hash).length) && /skip|jump|main|content/i.test(accessibleName(t) + ' ' + hash)) { skip = t; break; }
+      }
+    }
+    var hasMain = !!document.querySelector('main, [role="main"]');
+    var landmarkCount = document.querySelectorAll('main, nav, header, footer, aside, [role="main"], [role="navigation"], [role="banner"], [role="contentinfo"], [role="complementary"], [role="region"][aria-label], [role="region"][aria-labelledby], [role="search"]').length;
+    var headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6, [role="heading"]').length;
+    var repeated = document.querySelectorAll('nav a[href], header a[href], [role="navigation"] a[href]').length;
+    var data = { skipLink: skip ? cssPath(skip) : null, mainLandmark: hasMain, landmarks: landmarkCount, headings: headings, repeatedLinks: repeated };
+    if (skip) out.push(finding('passed', skip, 'Skip link "' + norm(accessibleName(skip)) + '" is among the first focusable elements.', data));
+    else if (hasMain || landmarkCount >= 2) out.push(finding('passed', null, 'No skip link, but landmarks allow bypassing repeated blocks (ARIA11).', data));
+    else if (headings >= 2) out.push(finding('needsReview', null, 'No skip link or landmarks; only headings (' + headings + ') provide a bypass mechanism. Add a <main> landmark or a skip link.', data));
+    else if (repeated >= 3) out.push(finding('failed', null, 'Repeated navigation (' + repeated + ' links) with no skip link, landmarks or heading structure to bypass it.', data));
+    else out.push(finding('inapplicable', null, 'No repeated blocks of content detected.', data));
+    return out;
+  };
+
+  rules['heading-structure'] = function () {
+    var out = [];
+    var hs = Array.prototype.filter.call(document.querySelectorAll('h1, h2, h3, h4, h5, h6, [role="heading"]'), function (h) { return isVisible(h) && !isHiddenFromAT(h); });
+    var textLen = norm(document.body.innerText || '').length;
+    if (hs.length === 0) {
+      if (textLen > 400) out.push(finding('needsReview', null, 'Page has ' + textLen + ' characters of text but no headings; screen reader users cannot navigate by section.', { characters: textLen }));
+      return out;
+    }
+    var prev = 0, h1s = 0;
+    hs.forEach(function (h) {
+      var lvl = parseInt(h.getAttribute('aria-level') || h.nodeName.replace('H', ''), 10);
+      if (!(lvl >= 1)) lvl = 2;
+      var name = norm(accessibleName(h));
+      if (!name) out.push(finding('failed', h, 'Empty heading (level ' + lvl + '); screen readers announce "heading level ' + lvl + '" with no text.', { level: lvl }));
+      if (lvl === 1) h1s++;
+      if (prev && lvl > prev + 1) out.push(finding('needsReview', h, 'Heading level jumps from h' + prev + ' to h' + lvl + ' ("' + name.slice(0, 60) + '"); skipped levels confuse the document outline.', { from: prev, to: lvl }));
+      prev = lvl;
+    });
+    if (h1s === 0) out.push(finding('needsReview', hs[0], 'No level-1 heading; the page has no top-level title in the heading outline.', { headings: hs.length }));
+    if (h1s > 1) out.push(finding('needsReview', null, h1s + ' level-1 headings; usually one h1 should name the page.', { h1: h1s }));
+    if (out.length === 0) out.push(finding('passed', null, hs.length + ' headings form a consistent outline with a single h1.', { headings: hs.length }));
+    return out;
+  };
+
+  rules['list-structure'] = function () {
+    var out = [];
+    document.querySelectorAll('ul, ol, [role="list"]').forEach(function (list) {
+      if (explicitRole(list) && explicitRole(list) !== 'list') return;
+      var bad = Array.prototype.filter.call(list.children, function (c) {
+        if (c.nodeName === 'SCRIPT' || c.nodeName === 'TEMPLATE') return false;
+        var r = explicitRole(c);
+        if (r) return r !== 'listitem' && r !== 'presentation' && r !== 'none';
+        return c.nodeName !== 'LI';
+      });
+      if (bad.length) out.push(finding('failed', list, 'List contains ' + bad.length + ' direct child(ren) that are not list items (e.g. <' + bad[0].nodeName.toLowerCase() + '>); screen readers report wrong item counts.', { badChildren: bad.slice(0, 3).map(cssPath) }));
+    });
+    document.querySelectorAll('li').forEach(function (li) {
+      if (explicitRole(li)) return;
+      var p = li.parentElement;
+      if (p && (p.nodeName === 'UL' || p.nodeName === 'OL' || p.nodeName === 'MENU' || explicitRole(p) === 'list')) return;
+      out.push(finding('failed', li, '<li> is not contained in a <ul>, <ol> or role="list" element.', {}));
+    });
+    document.querySelectorAll('dl').forEach(function (dl) {
+      var bad = Array.prototype.filter.call(dl.children, function (c) { return ['DT', 'DD', 'DIV', 'SCRIPT', 'TEMPLATE'].indexOf(c.nodeName) < 0; });
+      if (bad.length) out.push(finding('failed', dl, '<dl> contains elements other than <dt>/<dd>/<div> (e.g. <' + bad[0].nodeName.toLowerCase() + '>).', {}));
+    });
+    if (out.length === 0 && document.querySelector('ul, ol, dl, [role="list"]')) out.push(finding('passed', null, 'List markup is well-formed.', {}));
+    return out;
+  };
+
+  rules['table-headers'] = function () {
+    var out = [];
+    document.querySelectorAll('table').forEach(function (table) {
+      if (!isVisible(table) || isHiddenFromAT(table)) return;
+      var r = explicitRole(table);
+      if (r === 'presentation' || r === 'none') return;
+      var rows = table.rows;
+      if (rows.length < 2) return;
+      var cols = 0;
+      for (var i = 0; i < rows.length; i++) cols = Math.max(cols, rows[i].cells.length);
+      if (cols < 2) return;
+      var ths = table.querySelectorAll('th, [role="columnheader"], [role="rowheader"]');
+      var data = { rows: rows.length, cols: cols, headers: ths.length };
+      if (ths.length === 0) { out.push(finding('failed', table, 'Data table (' + rows.length + 'x' + cols + ') has no header cells (<th> or role=columnheader/rowheader); screen readers cannot associate cells with headers.', data)); return; }
+      var empty = Array.prototype.filter.call(ths, function (th) { return !norm(accessibleName(th)) && !norm(th.textContent); });
+      if (empty.length) out.push(finding('needsReview', empty[0], empty.length + ' header cell(s) are empty.', data));
+      var badHeaders = [];
+      table.querySelectorAll('[headers]').forEach(function (td) {
+        td.getAttribute('headers').split(/\s+/).forEach(function (id) { if (id && !table.querySelector('#' + esc(id))) badHeaders.push(id); });
+      });
+      if (badHeaders.length) out.push(finding('failed', table, 'headers attribute references cells that do not exist: ' + badHeaders.slice(0, 5).join(', '), data));
+      if (!empty.length && !badHeaders.length) out.push(finding('passed', table, 'Data table has ' + ths.length + ' header cell(s).', data));
+    });
+    return out;
+  };
+
+  rules['html-lang'] = function () {
+    var lang = document.documentElement.getAttribute('lang');
+    var xml = document.documentElement.getAttribute('xml:lang');
+    if (lang === null || !norm(lang)) return [finding('failed', document.documentElement, 'The <html> element has no lang attribute; screen readers cannot pick the right pronunciation rules.', { lang: lang })];
+    if (!isValidLang(lang)) return [finding('failed', document.documentElement, 'lang="' + lang + '" is not a valid BCP 47 language tag.', { lang: lang })];
+    if (xml && lower(xml.split('-')[0]) !== lower(lang.split('-')[0])) return [finding('failed', document.documentElement, 'lang="' + lang + '" and xml:lang="' + xml + '" disagree.', { lang: lang, xmlLang: xml })];
+    return [finding('passed', document.documentElement, 'Page language is "' + lang + '".', { lang: lang })];
+  };
+
+  rules['lang-attr-valid'] = function () {
+    var out = [];
+    document.querySelectorAll('body [lang]').forEach(function (el) {
+      var v = el.getAttribute('lang');
+      if (!isValidLang(v)) out.push(finding('failed', el, 'lang="' + v + '" is not a valid BCP 47 language tag.', { lang: v }));
+      else out.push(finding('passed', el, 'Language of part: "' + v + '".', { lang: v }));
+    });
+    return out;
+  };
+
+  rules['document-title'] = function () {
+    var t = norm(document.title);
+    if (!t) return [finding('failed', null, 'The page has no <title>; it is the first thing a screen reader announces and it identifies the tab/window.', {})];
+    if (/^(untitled|home|index|document|new page|page|welcome|title)$/i.test(t) || /\.(html?|php|aspx?)$/i.test(t)) return [finding('needsReview', null, 'Page title "' + t + '" is generic and does not describe the page topic or purpose.', { title: t })];
+    return [finding('passed', null, 'Page title: "' + t + '".', { title: t })];
+  };
+
+  rules['meta-viewport-zoom'] = function () {
+    var out = [];
+    document.querySelectorAll('meta[name="viewport"]').forEach(function (m) {
+      var c = lower(m.getAttribute('content'));
+      var data = { content: m.getAttribute('content') };
+      var noScale = /user-scalable\s*=\s*(no|0)/.test(c);
+      var max = c.match(/maximum-scale\s*=\s*([\d.]+)/);
+      if (noScale || (max && parseFloat(max[1]) < 2)) out.push(finding('failed', m, 'Viewport meta disables or limits pinch-zoom (' + data.content + '); users cannot scale text to 200%.', data));
+      else out.push(finding('passed', m, 'Viewport meta allows zooming.', data));
+    });
+    return out;
+  };
+
+  rules['scrollable-region-focusable'] = function () {
+    var out = [];
+    document.querySelectorAll('body *').forEach(function (el) {
+      if (!isVisible(el)) return;
+      var cs = style(el);
+      if (!cs) return;
+      var scrollsY = (cs.overflowY === 'auto' || cs.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 4;
+      var scrollsX = (cs.overflowX === 'auto' || cs.overflowX === 'scroll') && el.scrollWidth > el.clientWidth + 4;
+      if (!scrollsY && !scrollsX) return;
+      if (el.clientHeight === 0 || el.clientWidth === 0) return;
+      if (isFocusable(el)) { out.push(finding('passed', el, 'Scrollable region is keyboard focusable.', {})); return; }
+      var inner = Array.prototype.filter.call(el.querySelectorAll('a[href], button, input, select, textarea, [tabindex]'), isTabbable);
+      if (inner.length) { out.push(finding('passed', el, 'Scrollable region contains focusable content.', {})); return; }
+      out.push(finding('failed', el, 'Scrollable region (' + (scrollsY ? 'vertical' : 'horizontal') + ' overflow) is not keyboard focusable and has no focusable content; keyboard users cannot scroll it. Add tabindex="0".', { scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }));
+    });
+    return out;
+  };
+
+  rules['live-regions'] = function () {
+    var out = [];
+    document.querySelectorAll('[aria-live], [role="alert"], [role="status"], [role="log"], [role="marquee"], [role="timer"]').forEach(function (el) {
+      var live = lower(el.getAttribute('aria-live')) || (explicitRole(el) === 'alert' ? 'assertive' : 'polite');
+      var text = norm(el.textContent);
+      var descendants = el.querySelectorAll('*').length;
+      var data = { live: live, role: explicitRole(el), textLength: text.length, descendants: descendants };
+      if (live === 'assertive' && text.length > 0) out.push(finding('needsReview', el, 'Assertive live region already contains ' + text.length + ' characters on load; assertive interrupts the user and should be reserved for urgent status messages.', data));
+      else if (descendants > 40) out.push(finding('needsReview', el, 'Live region wraps a large subtree (' + descendants + ' elements); any DOM change inside will be announced. Scope live regions to the status message itself.', data));
+      else if (live !== 'off' && el.querySelector('a[href], button, input, select, textarea')) out.push(finding('needsReview', el, 'Live region contains interactive controls; changes to them will be announced unexpectedly.', data));
+      else out.push(finding('passed', el, 'Live region (' + live + ') is scoped.', data));
+    });
+    return out;
+  };
+
+  rules['autocomplete-valid'] = function () {
+    var out = [];
+    var TOKENS = ['name', 'honorific-prefix', 'given-name', 'additional-name', 'family-name', 'honorific-suffix', 'nickname', 'username', 'new-password', 'current-password', 'one-time-code', 'organization-title', 'organization', 'street-address', 'address-line1', 'address-line2', 'address-line3', 'address-level4', 'address-level3', 'address-level2', 'address-level1', 'country', 'country-name', 'postal-code', 'cc-name', 'cc-given-name', 'cc-additional-name', 'cc-family-name', 'cc-number', 'cc-exp', 'cc-exp-month', 'cc-exp-year', 'cc-csc', 'cc-type', 'transaction-currency', 'transaction-amount', 'language', 'bday', 'bday-day', 'bday-month', 'bday-year', 'sex', 'url', 'photo', 'tel', 'tel-country-code', 'tel-national', 'tel-area-code', 'tel-local', 'tel-local-prefix', 'tel-local-suffix', 'tel-extension', 'email', 'impp', 'webauthn', 'on', 'off'];
+    document.querySelectorAll('input[autocomplete], select[autocomplete], textarea[autocomplete]').forEach(function (el) {
+      var v = lower(el.getAttribute('autocomplete'));
+      if (!v) return;
+      var toks = v.split(/\s+/).filter(function (t) { return !/^section-/.test(t) && ['shipping', 'billing', 'home', 'work', 'mobile', 'fax', 'pager'].indexOf(t) < 0; });
+      var bad = toks.filter(function (t) { return TOKENS.indexOf(t) < 0; });
+      if (bad.length) out.push(finding('failed', el, 'autocomplete="' + v + '" contains unknown token(s) ' + bad.join(', ') + '; browsers and assistive tech cannot identify the field purpose.', { autocomplete: v }));
+    });
+    return out;
+  };
+
   /* --------------------------------------------------------- runtime helpers */
 
   var FOCUS_PROPS = ['outlineStyle', 'outlineWidth', 'outlineColor', 'outlineOffset', 'boxShadow', 'borderTopColor', 'borderTopWidth', 'borderTopStyle', 'borderBottomColor', 'backgroundColor', 'color', 'textDecorationLine', 'filter', 'transform', 'opacity'];

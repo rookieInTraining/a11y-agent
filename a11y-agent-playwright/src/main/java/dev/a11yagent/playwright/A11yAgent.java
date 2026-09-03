@@ -62,6 +62,16 @@ public final class A11yAgent {
         return auditor;
     }
 
+    /** The browser accessibility tree of the current page (Chromium), for custom screen-reader-oriented assertions. */
+    public java.util.Optional<dev.a11yagent.core.ax.AxTree> accessibilityTree() {
+        return new PlaywrightDriver(page).accessibilityTree();
+    }
+
+    /** Text rendering of the exposed accessibility tree: roles, names and states. */
+    public String accessibilityTreeText() {
+        return new PlaywrightDriver(page).renderAccessibilityTree(40);
+    }
+
     /** Audits the page currently loaded in the Playwright {@link Page}. */
     public AuditReport audit() {
         return auditor.auditPage();
