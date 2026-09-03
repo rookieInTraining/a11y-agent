@@ -44,7 +44,7 @@ public final class FocusVisibleRule extends RuntimeRule {
         List<Finding> out = new ArrayList<>();
         int shots = 0;
         for (KeyboardTraversal.Stop stop : t.stops()) {
-            List<String> changed = stop.changedStyleKeys();
+            List<String> changed = visibleChanges(stop);
             Map<String, Object> data = new HashMap<>();
             data.put("changedStyles", changed);
             data.put("outlineStyle", stop.focusedStyles().get("outlineStyle"));
@@ -100,6 +100,38 @@ public final class FocusVisibleRule extends RuntimeRule {
             out.add(pageFinding(Outcome.CANT_TELL, "Tab traversal stopped after " + t.stops().size() + " stops (maxFocusStops); remaining elements were not checked.", Map.of(), url));
         }
         return out;
+    }
+
+    /**
+     * Style changes that can actually be seen: outline colour/width/offset changes are irrelevant while the
+     * outline style is {@code none} (the UA stylesheet still toggles them), and pseudo-element changes are
+     * irrelevant while the pseudo-element is not displayed.
+     */
+    static List<String> visibleChanges(KeyboardTraversal.Stop stop) {
+        List<String> changed = new ArrayList<>(stop.changedStyleKeys());
+        Map<String, Object> s = stop.focusedStyles();
+        Map<String, Object> b = stop.baselineStyles() == null ? Map.of() : stop.baselineStyles();
+        if (outlineHidden(s.get("outlineStyle"), s.get("outlineWidth")) && outlineHidden(b.get("outlineStyle"), b.get("outlineWidth"))) {
+            changed.removeIf(k -> k.startsWith("outline"));
+        }
+        for (String pseudo : List.of("before", "after")) {
+            if ("none".equals(String.valueOf(s.get(pseudo + ".display"))) && "none".equals(String.valueOf(b.get(pseudo + ".display")))) {
+                changed.removeIf(k -> k.startsWith(pseudo + "."));
+            }
+            if (outlineHidden(s.get(pseudo + ".outlineStyle"), s.get(pseudo + ".outlineWidth")) && outlineHidden(b.get(pseudo + ".outlineStyle"), b.get(pseudo + ".outlineWidth"))) {
+                changed.removeIf(k -> k.startsWith(pseudo + ".outline"));
+            }
+        }
+        if (outlineHidden(s.get("parent.outlineStyle"), s.get("parent.outlineWidth")) && outlineHidden(b.get("parent.outlineStyle"), b.get("parent.outlineWidth"))) {
+            changed.removeIf(k -> k.startsWith("parent.outline"));
+        }
+        return changed;
+    }
+
+    private static boolean outlineHidden(Object style, Object width) {
+        String st = String.valueOf(style);
+        String w = String.valueOf(width);
+        return "none".equals(st) || "null".equals(st) || "0px".equals(w);
     }
 
     private Finding withShot(RuleContext ctx, Finding f) {

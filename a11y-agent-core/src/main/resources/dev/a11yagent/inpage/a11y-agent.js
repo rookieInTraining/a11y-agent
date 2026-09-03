@@ -258,11 +258,19 @@
     return len;
   }
 
+  function ownText(el) {
+    var t = '';
+    el.childNodes.forEach(function (n) { if (n.nodeType === 3) t += n.nodeValue; });
+    return norm(t);
+  }
+
+  /* True when the element sits inside running text (a sentence), which is the "inline" exception of 2.5.8 and the text-block context of 1.4.1. */
   function inParagraphOfText(el) {
     var p = el.parentElement;
     var hops = 0;
     while (p && hops < 3) {
-      if (ownTextLength(p) >= 15) return true;
+      var t = ownText(p);
+      if (t.length >= 10 || (t.length >= 3 && /[.,;:!?]/.test(t))) return true;
       var cs = style(p);
       if (cs && cs.display !== 'inline') break;
       p = p.parentElement; hops++;
@@ -1006,7 +1014,12 @@
     var navs = [];
     document.querySelectorAll('nav, [role="navigation"], header, footer, [role="banner"], [role="contentinfo"]').forEach(function (n) {
       if (!isVisible(n)) return;
-      var items = Array.prototype.filter.call(n.querySelectorAll('a[href], button'), isVisible).map(function (a) { return norm(accessibleName(a)); }).filter(Boolean);
+      var isNav = n.matches('nav, [role="navigation"]');
+      var items = Array.prototype.filter.call(n.querySelectorAll('a[href], button'), function (a) {
+        if (!isVisible(a)) return false;
+        // header/footer regions only own the controls that are not already inside a nested nav region
+        return isNav || !a.closest('nav, [role="navigation"]');
+      }).map(function (a) { return norm(accessibleName(a)); }).filter(Boolean);
       if (items.length === 0) return;
       navs.push({ selector: cssPath(n), label: norm(n.getAttribute('aria-label') || ''), tag: n.nodeName.toLowerCase(), items: items });
     });

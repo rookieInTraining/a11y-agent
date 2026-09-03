@@ -5,14 +5,14 @@
 <meta http-equiv="refresh" content="600">
 <title>Deliberately inaccessible fixture</title>
 <style>
-  body { font: 16px/1.4 Arial, sans-serif; margin: 0; padding: 0 24px 200px; }
+  body { font: 16px/1.4 Arial, sans-serif; margin: 0; padding: 0 24px 0; }   /* no bottom padding: last link ends up under the fixed footer */
   *:focus { outline: none; }                       /* 2.4.7 failure: no focus indicator anywhere */
   header { padding: 16px 0; }
   .fixed-footer { position: fixed; left: 0; right: 0; bottom: 0; height: 120px; background: #222; color: #fff; padding: 12px; }
   p a { color: #0645ad; text-decoration: none; }  /* 1.4.1 failure: colour only */
   .icon-btn { width: 16px; height: 16px; padding: 0; border: 1px solid #999; background: #eee; display: inline-block; vertical-align: middle; }
   .wide { width: 900px; height: 40px; background: #ddd; }  /* 1.4.10 failure at 320px */
-  .clip { width: 320px; height: 1.2em; overflow: hidden; }  /* 1.4.12 failure: clips when spacing grows */
+  .clip { width: 320px; height: 1.4em; line-height: 1.4; overflow: hidden; white-space: normal; }  /* 1.4.12 failure: wraps and clips when spacing grows */
   .card { border: 1px solid #ccc; padding: 8px; margin: 8px 0; cursor: pointer; }
   .spacer { height: 500px; }
   .offscreen { position: absolute; left: -9999px; top: 0; }
@@ -72,6 +72,6 @@
   <p><a href="/last">Very last link</a></p>
 </main>
 
-<div class="fixed-footer">Fixed footer with plenty of text so it paints over content beneath it.</div>
+<div id="fixed-footer" class="fixed-footer">Fixed footer with plenty of text so it paints over content beneath it.</div>
 </body>
 </html>

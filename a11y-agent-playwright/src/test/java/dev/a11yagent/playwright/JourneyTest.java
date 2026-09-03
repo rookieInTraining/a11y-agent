@@ -45,7 +45,7 @@ class JourneyTest extends BrowserTestBase {
         assertTrue(nav.get(0).message().contains("different order"));
 
         List<Finding> ident = findings(r, "consistent-identification", Outcome.FAILED);
-        assertTrue(ident.stream().anyMatch(f -> f.message().contains("step3.html") && f.message().contains("continue") && f.message().contains("next step")), () -> ident.toString());
+        assertTrue(ident.stream().anyMatch(f -> f.message().contains("step3.html") && f.message().contains("review order") && f.message().contains("next step")), () -> ident.toString());
 
         List<Finding> help = findings(r, "consistent-help", Outcome.FAILED);
         assertEquals(1, help.size(), () -> r.journeyFindings().toString());
