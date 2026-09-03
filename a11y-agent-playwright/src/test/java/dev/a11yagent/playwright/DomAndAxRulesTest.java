@@ -92,6 +92,8 @@ class DomAndAxRulesTest extends BrowserTestBase {
         List<Finding> generic = failed("ax-focusable-without-role");
         assertTrue(generic.stream().anyMatch(f -> f.target().selector().equals("#custom")), () -> generic.toString());
         assertTrue(generic.stream().anyMatch(f -> f.target().selector().equals("#lang-picker")), () -> generic.toString());
+        assertTrue(generic.stream().anyMatch(f -> f.target().selector().equals("#fake-skip") && f.message().contains("static role")), () -> generic.toString());
+        assertTrue(generic.stream().noneMatch(f -> f.target().selector().equals("#programmatic-target")), () -> generic.toString());
         List<Finding> quality = review("ax-name-quality");
         assertTrue(quality.stream().anyMatch(f -> f.message().contains("repeats the role") && f.message().contains("Save changes button")), () -> quality.toString());
         assertTrue(quality.stream().anyMatch(f -> f.message().contains("pointer/keyboard instructions")), () -> quality.toString());

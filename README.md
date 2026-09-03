@@ -5,12 +5,13 @@ web pages and scripted user journeys against **WCAG 2.0, 2.1 and 2.2 (levels A, 
 uses **vision/language models** as judges for criteria that need human-like judgement, and generates
 **VPAT 2.5 / ACR** drafts from the evidence.
 
-It is not another axe-core. The rule catalogue deliberately skips what DOM linters already do well
-(missing `alt`, missing labels, contrast of solid text, duplicate ids, ARIA attribute validity) and
-concentrates on the criteria those tools leave to manual testing:
+It works in four layers so it can stand alone (no axe-core dependency) while covering what linters
+leave to manual testing:
 
 | Category | What the agent actually does |
 |---|---|
+| **DOM analysis** | The linter baseline, implemented in one dependency-free in-page script: colour contrast with background compositing and overlap detection (1.4.3/1.4.6), missing text alternatives (1.1.1), empty names on links/buttons/fields/frames (4.1.2), ARIA validity — roles, attributes, values, id references, required states and parent contexts, prohibited `aria-label` on generic elements, presentational-role conflicts, focusable content inside `aria-hidden` — landmarks (single main, top-level banner/contentinfo, unique names, content outside landmarks), bypass blocks (2.4.1), heading/list/table structure, `lang`, page title, viewport zoom lock, scrollable regions, live regions, `autocomplete` tokens, nested interactive controls, duplicate ids. |
+| **Accessibility tree** | Reads Chromium's accessibility tree over CDP — what a screen reader actually receives — and probes it: elements in the tab order exposed as `generic`/`heading`/`paragraph` (the `<div tabindex="0">` and `<h2 tabindex="0">` anti-patterns), names containing pointer instructions ("click here to…"), names repeating the role, URL/file-name names, descriptions equal to names. Browser-computed names are also used to reconcile the DOM name/alt checks: DOM failures the browser does name are downgraded, unnamed nodes the DOM missed are added. `a11y-agent axtree <url>` prints the tree. |
 | **Runtime probes** | Presses <kbd>Tab</kbd> through the page and compares focused/unfocused computed styles (2.4.7), checks the visual reading order (2.4.3), samples `elementFromPoint` to detect sticky headers/banners covering focus (2.4.11/2.4.12), detects keyboard traps (2.1.2), resizes to 320 px (1.4.10), injects WCAG text-spacing overrides (1.4.12) and 200 % zoom (1.4.4) and diffs clipping/overlap. |
 | **In-page heuristics** | Alt-text *quality* (file names, generic words, redundancy), link purpose in context and link-only (2.4.4/2.4.9), colour-only links (1.4.1), sensory-characteristic instructions (1.3.3), target size with spacing/inline exceptions (2.5.8/2.5.5), label-in-name (2.5.3), auto-refresh (2.2.1), moving content and infinite animations (2.2.2), non-focusable click handlers (2.1.1), autocomplete tokens for personal data (1.3.5), placeholder headings/labels (2.4.6), orientation locks (1.3.4), dragging (2.5.7), CAPTCHAs / paste blocking on login forms (3.3.8/3.3.9), `title` tooltips (1.4.13). |
 | **Journeys** | Scripted multi-step flows. Cross-step rules compare page states: consistent navigation (3.2.3), consistent identification (3.2.4), consistent help (3.2.6) and redundant entry (3.3.7). |
@@ -103,6 +104,7 @@ java -jar $JAR check 2.5.8 https://example.com --ai
 java -jar $JAR journey checkout.yaml -o out-journey -v
 java -jar $JAR vpat out/report.json out-journey/report.json --product "Shop 1.0" --vendor "Acme"
 java -jar $JAR rules --coverage
+java -jar $JAR axtree https://example.com --depth 20     # the screen reader view: roles, names, states
 ```
 
 Exit code is `2` when any `FAILED` finding exists (`--fail-on NEEDS_REVIEW` to be stricter), so the
@@ -160,10 +162,21 @@ The output is a draft: Not Evaluated rows and AI-based judgements must be confir
 
 ## Rule catalogue and WCAG coverage
 
-`java -jar a11y-agent.jar rules --coverage` prints the full list. Today 26 page rules and 4 journey
-rules cover 30 of the 86 WCAG 2.2 success criteria, all of them criteria that are not mechanically
-testable by DOM linters. Criteria without coverage are reported as *Not Evaluated* rather than
-silently omitted.
+`java -jar a11y-agent.jar rules --coverage` prints the full list. Today 47 page rules and 4 journey
+rules cover 39 of the 86 WCAG 2.2 success criteria: the DOM baseline a linter covers, plus the
+behavioural, accessibility-tree and judgement rules linters do not. Criteria without coverage are
+reported as *Not Evaluated* rather than silently omitted.
+
+### Accessibility tree in your own tests
+
+```java
+AxTree tree = agent.accessibilityTree().orElseThrow();       // Chromium only
+assertTrue(tree.exposed().anyMatch(n -> "button".equals(n.role()) && "Place order".equals(n.name())));
+System.out.println(agent.accessibilityTreeText());             // roles, names, states, indented
+```
+
+Selenium 4 can obtain the same tree through its CDP/BiDi bridge, so a Selenium `PageDriver` will
+reuse these rules unchanged.
 
 ## Tests
 
@@ -184,5 +197,6 @@ and a three-step checkout with cross-page inconsistencies.
 * MCP server exposing `audit`, `check` and `journey` to coding agents.
 * More AI judges: 1.4.11 non-text contrast on screenshots, 2.4.6 heading descriptiveness,
   3.1.2 language of parts, 3.3.2 instructions.
+* Contrast for text over background images/gradients via screenshot sampling (currently `CANT_TELL`).
 * ARIA Authoring Practices behaviour probes (tabs, menus, dialogs, comboboxes) via keyboard.
 * DOCX export of the VPAT.

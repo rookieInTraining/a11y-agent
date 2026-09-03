@@ -188,6 +188,9 @@ final class CdpAccessibilityTree {
         if (depth > maxDepth) {
             return;
         }
+        if ("InlineTextBox".equals(n.role())) {
+            return; // layout detail, not an AT object
+        }
         if (!n.ignored()) {
             sb.append("  ".repeat(depth)).append(n.role());
             if (n.hasName()) {
