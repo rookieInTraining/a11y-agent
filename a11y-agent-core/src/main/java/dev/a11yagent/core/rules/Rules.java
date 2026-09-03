@@ -8,7 +8,7 @@ import dev.a11yagent.core.journey.rules.ConsistentNavigationRule;
 import dev.a11yagent.core.journey.rules.RedundantEntryRule;
 import dev.a11yagent.core.model.Impact;
 import dev.a11yagent.core.rules.ai.AltTextQualityRule;
-import dev.a11yagent.core.rules.ax.AxReconciledNameRule;
+import dev.a11yagent.core.rules.ax.AxNameRule;
 import dev.a11yagent.core.rules.ax.FocusableWithoutRoleRule;
 import dev.a11yagent.core.rules.ax.NameQualityRule;
 import dev.a11yagent.core.rules.runtime.FocusNotObscuredRule;
@@ -46,11 +46,31 @@ public final class Rules {
 
     static {
         // ---- DOM analysis baseline (what a linter checks), reconciled with the browser AX tree where it matters
-        add(new AxReconciledNameRule("image-alt", "Images, image inputs, image maps and role=img elements have a text alternative (DOM + browser accessibility tree).",
-                sc("1.1.1"), Impact.CRITICAL, n -> "image".equals(n.role()) || "img".equals(n.role()), "Image"));
-        add(new AxReconciledNameRule("control-name", "Links, buttons, form fields, custom controls and frames have a non-empty accessible name (DOM + browser accessibility tree).",
-                sc("4.1.2", "2.4.4", "1.3.1"), Impact.CRITICAL,
-                n -> AxNode.NAME_REQUIRED_ROLES.contains(n.role()) && !"image".equals(n.role()) && !"img".equals(n.role()) || "Iframe".equals(n.role()), "Control"));
+        add(new AxNameRule("image-alt", "Images, image buttons, image maps, SVG with an image role and objects have a text alternative (browser accessibility tree, DOM fallback).",
+                sc("1.1.1"), Impact.CRITICAL, Map.of(
+                        "image", "image-name",
+                        "img", "image-name",
+                        "graphics-symbol", "svg-name",
+                        "graphics-document", "svg-name")));
+        add(new AxNameRule("control-name", "Links, buttons, form fields, menu items, summaries and frames have a non-empty accessible name (browser accessibility tree, DOM fallback).",
+                sc("4.1.2", "2.4.4", "1.3.1"), Impact.CRITICAL, Map.ofEntries(
+                        Map.entry("button", "button-name"),
+                        Map.entry("link", "link-name"),
+                        Map.entry("textbox", "field-name"),
+                        Map.entry("searchbox", "field-name"),
+                        Map.entry("combobox", "field-name"),
+                        Map.entry("listbox", "field-name"),
+                        Map.entry("slider", "field-name"),
+                        Map.entry("spinbutton", "field-name"),
+                        Map.entry("checkbox", "field-name"),
+                        Map.entry("radio", "field-name"),
+                        Map.entry("switch", "field-name"),
+                        Map.entry("menuitem", "menuitem-name"),
+                        Map.entry("menuitemcheckbox", "menuitem-name"),
+                        Map.entry("menuitemradio", "menuitem-name"),
+                        Map.entry("DisclosureTriangle", "summary-name"),
+                        Map.entry("Iframe", "iframe-name"),
+                        Map.entry("heading", "heading-name"))));
         add(new InPageRule("color-contrast", "Text has at least 4.5:1 contrast (3:1 for large text) against its composited background.", sc("1.4.3"), Impact.SERIOUS));
         add(new InPageRule("color-contrast-enhanced", "Text has at least 7:1 contrast (4.5:1 for large text) (AAA).", sc("1.4.6"), Impact.MINOR));
         add(new InPageRule("aria-validity", "ARIA roles, attributes, values, id references, required states and contexts are valid; presentational-role conflicts and aria-hidden focusable content are flagged.", sc("4.1.2"), Impact.SERIOUS));
@@ -68,6 +88,7 @@ public final class Rules {
         add(new InPageRule("scrollable-region-focusable", "Scrollable regions are reachable by keyboard.", sc("2.1.1"), Impact.SERIOUS));
         add(new InPageRule("live-regions", "Live regions are scoped to status messages and not assertive by default.", sc("4.1.3"), Impact.MODERATE));
         add(new InPageRule("autocomplete-valid", "autocomplete attributes use valid tokens.", sc("1.3.5"), Impact.SERIOUS));
+        add(new InPageRule("text-spacing-style-attr", "!important letter-spacing, word-spacing and line-height in style attributes do not block the WCAG 1.4.12 values.", sc("1.4.12"), Impact.SERIOUS));
         // ---- browser accessibility tree (screen reader view)
         add(new FocusableWithoutRoleRule());
         add(new NameQualityRule());

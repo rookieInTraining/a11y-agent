@@ -47,8 +47,12 @@ public final class KeyboardTraversal {
         }
     }
 
+    /**
+     * @param revisited element that focus returned to more than twice, which means focus is looping in a
+     *                  subset of the page rather than progressing through it
+     */
     public record Result(List<Stop> stops, List<Map<String, Object>> tabbables, boolean trapped, String trapSelector,
-                         boolean cycled, int presses, boolean truncated) {
+                         boolean cycled, int presses, boolean truncated, String revisited, int distinctVisited) {
     }
 
     private KeyboardTraversal() {
@@ -80,10 +84,14 @@ public final class KeyboardTraversal {
         boolean cycled = false;
         boolean left = false;
         int presses = 0;
+        Map<String, Integer> visits = new HashMap<>();
+        String revisited = null;
 
         for (int i = 0; i < limit + 3; i++) {
             driver.press("Tab");
             presses++;
+            // a script that pulls focus back on blur does so asynchronously, so read the focus after it settles
+            driver.waitMillis(30);
             Map<String, Object> active = (Map<String, Object>) inPage.call("activeElement", null);
             if (Boolean.TRUE.equals(active.get("body"))) {
                 if (left) {
@@ -94,6 +102,10 @@ public final class KeyboardTraversal {
             }
             left = true;
             String selector = (String) active.get("selector");
+            int seen = visits.merge(selector, 1, Integer::sum);
+            if (seen > 2 && revisited == null) {
+                revisited = selector;
+            }
             if (selector.equals(last)) {
                 repeats++;
                 if (repeats >= 2) {
@@ -128,6 +140,6 @@ public final class KeyboardTraversal {
         }
         inPage.call("blur", null);
         boolean truncated = !cycled && !trapped && stops.size() >= limit;
-        return new Result(stops, tabbables, trapped, trapSelector, cycled, presses, truncated);
+        return new Result(stops, tabbables, trapped, trapSelector, cycled, presses, truncated, revisited, visits.size());
     }
 }

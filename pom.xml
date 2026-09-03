@@ -16,6 +16,7 @@
     <module>a11y-agent-core</module>
     <module>a11y-agent-playwright</module>
     <module>a11y-agent-cli</module>
+    <module>a11y-agent-benchmark</module>
   </modules>
 
   <properties>

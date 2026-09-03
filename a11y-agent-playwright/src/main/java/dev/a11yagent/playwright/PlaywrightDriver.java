@@ -1,5 +1,6 @@
 package dev.a11yagent.playwright;
 
+import com.microsoft.playwright.CDPSession;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.Clip;
 import com.microsoft.playwright.options.ViewportSize;
@@ -82,9 +83,22 @@ public final class PlaywrightDriver implements PageDriver {
         page.waitForTimeout(millis);
     }
 
+    private CDPSession cdp;
+    private boolean cdpUnavailable;
+
+    /** One DevTools session per page, created lazily and reused for every audit of that page. */
+    private Optional<CDPSession> cdpSession() {
+        if (cdp == null && !cdpUnavailable) {
+            Optional<CDPSession> s = CdpAccessibilityTree.session(page);
+            cdpUnavailable = s.isEmpty();
+            cdp = s.orElse(null);
+        }
+        return Optional.ofNullable(cdp);
+    }
+
     @Override
     public Optional<AxTree> accessibilityTree() {
-        return CdpAccessibilityTree.fetch(page);
+        return cdpSession().flatMap(CdpAccessibilityTree::fetch);
     }
 
     /** Human readable rendering of the exposed accessibility tree (roles, names, states). */
