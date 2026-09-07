@@ -32,6 +32,9 @@ public final class ActCommand implements Callable<Integer> {
     @Option(names = "--headed", description = "Show the browser window.")
     boolean headed;
 
+    @Option(names = "--workers", defaultValue = "6", description = "Parallel browser pages (default: ${DEFAULT-VALUE}).")
+    int workers;
+
     @Option(names = {"-v", "--verbose"}, description = "Print each test case as it runs.")
     boolean verbose;
 
@@ -49,7 +52,7 @@ public final class ActCommand implements Callable<Integer> {
             int corpusRules = (int) cases.stream().map(ActTestCase::ruleId).distinct().count();
             System.out.printf("Corpus: %d cases, %d rules. Claimed: %d rules.%n", cases.size(), corpusRules, ActMapping.claims().size());
 
-            ActRunner runner = new ActRunner(corpus, out.resolve("artifacts"), !headed);
+            ActRunner runner = new ActRunner(corpus, out.resolve("artifacts"), !headed, workers);
             if (verbose) {
                 runner.onProgress(s -> System.out.println("  " + s));
             } else {

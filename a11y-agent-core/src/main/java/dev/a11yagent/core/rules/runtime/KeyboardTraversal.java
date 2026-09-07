@@ -1,6 +1,7 @@
 package dev.a11yagent.core.rules.runtime;
 
 import dev.a11yagent.core.driver.Rect;
+import dev.a11yagent.core.report.AuditRecorder;
 import dev.a11yagent.core.rules.RuleContext;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -60,6 +61,15 @@ public final class KeyboardTraversal {
 
     public static Result of(RuleContext ctx) {
         return ctx.cached("keyboard-traversal", () -> run(ctx));
+    }
+
+    /** Opens probe widgets when configured, then runs Tab without caching (keyboard-trap only). */
+    public static Result ofForTrapProbe(RuleContext ctx) {
+        if (ctx.config().openWidgetsBeforeTrap()) {
+            ctx.inPage().call("activateProbeWidgets", Map.of("max", 3));
+            ctx.driver().waitMillis(200);
+        }
+        return run(ctx);
     }
 
     @SuppressWarnings("unchecked")
@@ -134,6 +144,7 @@ public final class KeyboardTraversal {
                     (Map<String, Object>) active.get("styles"),
                     baseline.get(selector),
                     obscured));
+            ctx.recorder().ifPresent(AuditRecorder::captureSparse);
             if (stops.size() >= limit) {
                 break;
             }

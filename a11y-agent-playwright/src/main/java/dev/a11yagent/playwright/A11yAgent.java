@@ -20,12 +20,14 @@ import java.util.function.Consumer;
  * A11yAgent agent = A11yAgent.forPage(page);
  * AuditReport report = agent.audit();                 // whole page, every rule in scope
  * AuditReport focus  = agent.check("2.4.7");          // one criterion (or a rule id)
+ * AuditReport errors = agent.observe("3.3.1", p -> p.click("button[type=submit]")); // wrap transitions
  * AuditReport flow   = agent.journey("checkout")
  *         .start("https://shop.example")
  *         .step("open cart", p -> p.click("text=Cart"))
  *         .step("checkout", p -> p.click("text=Checkout"))
  *         .run();
- * agent.write(flow, Path.of("a11y-artifacts"));      // report.json + report.html
+ * agent.write(flow, Path.of("a11y-artifacts"));      // report.json + report.html (+ audit.webm)
+ * // With a modelClient, leftover CANT_TELL / NEEDS_REVIEW findings are reviewed against recording frames.
  * agent.vpat(flow, VpatOptions.forProduct("Shop 1.0")).write(...);
  * }</pre>
  */
@@ -93,6 +95,17 @@ public final class A11yAgent {
         return auditor.check(ruleOrCriterion);
     }
 
+    /**
+     * Runs a check while observing DOM/focus/live-region changes during {@code action}. Use for submit
+     * flows and other transitions (3.3.1, 4.1.3).
+     */
+    public AuditReport observe(String ruleOrCriterion, java.util.function.Consumer<Page> action) {
+        return auditor.observe(ruleOrCriterion, () -> {
+            action.accept(page);
+            page.waitForLoadState();
+        });
+    }
+
     public JourneyBuilder journey(String name) {
         return new JourneyBuilder(name);
     }
@@ -101,7 +114,7 @@ public final class A11yAgent {
         return auditor.runJourney(journey);
     }
 
-    /** Writes {@code report.json} and {@code report.html} into {@code dir} (screenshots already live there). */
+    /** Writes {@code report.json} and {@code report.html} into {@code dir} (screenshots and {@code audit.webm} already live there). */
     public void write(AuditReport report, Path dir) {
         ReportJson.write(report, dir.resolve("report.json"));
         HtmlReportWriter.write(report, dir.resolve("report.html"));

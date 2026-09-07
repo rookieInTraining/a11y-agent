@@ -5,6 +5,8 @@ web pages and scripted user journeys against **WCAG 2.0, 2.1 and 2.2 (levels A, 
 uses **vision/language models** as judges for criteria that need human-like judgement, and generates
 **VPAT 2.5 / ACR** drafts from the evidence.
 
+New here? See **[Getting started](GETTING_STARTED.md)** for setup, wrapping an existing Playwright `Page` / `BrowserContext` or Selenium `WebDriver`, and the commands to run tests and audits.
+
 It works in four layers so it can stand alone (no axe-core dependency) while covering what linters
 leave to manual testing:
 
@@ -15,8 +17,8 @@ leave to manual testing:
 | **Runtime probes** | Presses <kbd>Tab</kbd> through the page and compares focused/unfocused computed styles (2.4.7), checks the visual reading order (2.4.3), samples `elementFromPoint` to detect sticky headers/banners covering focus (2.4.11/2.4.12), detects keyboard traps (2.1.2), resizes to 320 px (1.4.10), injects WCAG text-spacing overrides (1.4.12) and 200 % zoom (1.4.4) and diffs clipping/overlap. |
 | **In-page heuristics** | Alt-text *quality* (file names, generic words, redundancy), link purpose in context and link-only (2.4.4/2.4.9), colour-only links (1.4.1), sensory-characteristic instructions (1.3.3), target size with spacing/inline exceptions (2.5.8/2.5.5), label-in-name (2.5.3), auto-refresh (2.2.1), moving content and infinite animations (2.2.2), non-focusable click handlers (2.1.1), autocomplete tokens for personal data (1.3.5), placeholder headings/labels (2.4.6), orientation locks (1.3.4), dragging (2.5.7), CAPTCHAs / paste blocking on login forms (3.3.8/3.3.9), `title` tooltips (1.4.13). |
 | **Journeys** | Scripted multi-step flows. Cross-step rules compare page states: consistent navigation (3.2.3), consistent identification (3.2.4), consistent help (3.2.6) and redundant entry (3.3.7). |
-| **AI judges** | A pluggable `ModelClient` (Anthropic, OpenAI, any OpenAI-compatible endpoint such as Ollama) receives screenshot crops plus DOM context and returns a structured `{result, confidence, rationale}`. Used today for 1.1.1 alt-text adequacy and ambiguous focus indicators; every AI verdict is quoted in the report with its confidence and never becomes a conformance claim without human confirmation. |
-| **Reporting** | ACT-Rules outcome vocabulary (`PASSED`, `FAILED`, `INAPPLICABLE`, `CANT_TELL`, `NEEDS_REVIEW`), JSON + accessible HTML report with evidence screenshots, and a VPAT 2.5 (WCAG edition) generator producing HTML, Markdown and JSON. |
+| **AI judges** | A pluggable `ModelClient` (Anthropic, OpenAI, any OpenAI-compatible endpoint such as Ollama) receives screenshot crops plus DOM context and returns a structured `{result, confidence, rationale}`. Used today for 1.1.1 alt-text adequacy, ambiguous focus indicators, and a post-run review of leftover Can't tell / Needs review findings against audit recording frames. Every AI verdict is quoted in the report with its confidence and never becomes a conformance claim without human confirmation. |
+| **Reporting** | ACT-Rules outcome vocabulary (`PASSED`, `FAILED`, `INAPPLICABLE`, `CANT_TELL`, `NEEDS_REVIEW`), JSON + accessible HTML report with highlighted viewport screenshots, an `audit.webm` recording of the run, and a VPAT 2.5 (WCAG edition) generator producing HTML, Markdown and JSON. |
 
 ## Modules
 
@@ -59,6 +61,9 @@ try (Playwright pw = Playwright.create()) {
     AuditReport focus = agent.check("2.4.7");
     assertFalse(focus.hasFailures());
 
+    // 1b. observe around submit for transition-dependent criteria (3.3.1, 4.1.3)
+    AuditReport errors = agent.observe("3.3.1", p -> p.click("button[type=submit]"));
+
     // 2. whole page, every rule in scope of the configured WCAG version/level
     AuditReport report = agent.audit();
 
@@ -85,6 +90,7 @@ A11yConfig config = A11yConfig.builder()
         .artifactsDir(Path.of("a11y-artifacts"))
         .modelClient(ModelClients.fromEnv().orElse(null))   // enables AI judges
         .maxAiJudgements(25)
+        .scopeSelector("main")                    // optional: limit in-page rules to a subtree
         .excludeRules(Set.of("content-on-hover-title"))
         .build();
 A11yAgent agent = A11yAgent.forPage(page, config);
@@ -162,8 +168,8 @@ The output is a draft: Not Evaluated rows and AI-based judgements must be confir
 
 ## Rule catalogue and WCAG coverage
 
-`java -jar a11y-agent.jar rules --coverage` prints the full list. Today 47 page rules and 4 journey
-rules cover 39 of the 86 WCAG 2.2 success criteria: the DOM baseline a linter covers, plus the
+`java -jar a11y-agent.jar rules --coverage` prints the full list. Today 50 page rules and 4 journey
+rules cover 41 of the 86 WCAG 2.2 success criteria: the DOM baseline a linter covers, plus the
 behavioural, accessibility-tree and judgement rules linters do not. Criteria without coverage are
 reported as *Not Evaluated* rather than silently omitted.
 
@@ -196,7 +202,7 @@ and a three-step checkout with cross-page inconsistencies.
   for the runtime probes; the artifacts/report layer is already framework-agnostic.
 * MCP server exposing `audit`, `check` and `journey` to coding agents.
 * More AI judges: 1.4.11 non-text contrast on screenshots, 2.4.6 heading descriptiveness,
-  3.1.2 language of parts, 3.3.2 instructions.
+  3.1.2 language of parts.
 * Contrast for text over background images/gradients via screenshot sampling (currently `CANT_TELL`).
 * ARIA Authoring Practices behaviour probes (tabs, menus, dialogs, comboboxes) via keyboard.
 * DOCX export of the VPAT.

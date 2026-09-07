@@ -1,6 +1,7 @@
 package dev.a11yagent.core.rules;
 
 import dev.a11yagent.core.model.Finding;
+import dev.a11yagent.core.model.Impact;
 import dev.a11yagent.core.wcag.Criterion;
 import java.util.List;
 import java.util.Set;
@@ -17,6 +18,19 @@ public interface Rule {
     Set<Criterion> criteria();
 
     RuleKind kind();
+
+    /**
+     * How this rule uses a vision/language model. {@link AiAssist#AI_ONLY} when the model <em>is</em>
+     * the check; {@link AiAssist#ENHANCED} when the model only judges cases the deterministic probe
+     * could not settle.
+     */
+    default AiAssist aiAssist() {
+        return kind() == RuleKind.AI ? AiAssist.AI_ONLY : AiAssist.NONE;
+    }
+
+    default Impact impact() {
+        return Impact.MODERATE;
+    }
 
     /**
      * Evaluates the rule against the current page state. Implementations should return a single

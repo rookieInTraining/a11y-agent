@@ -1,6 +1,8 @@
 package dev.a11yagent.core;
 
 import dev.a11yagent.core.ai.Judge;
+import dev.a11yagent.core.ai.ModelClient;
+import dev.a11yagent.core.ai.VideoEnrichment;
 import dev.a11yagent.core.config.A11yConfig;
 import dev.a11yagent.core.driver.PageDriver;
 import dev.a11yagent.core.journey.Journey;
@@ -18,6 +20,9 @@ import dev.a11yagent.core.rules.RuleContext;
 import dev.a11yagent.core.rules.Rules;
 import dev.a11yagent.core.wcag.Criterion;
 import dev.a11yagent.core.wcag.Wcag;
+import dev.a11yagent.core.observe.Observation;
+import dev.a11yagent.core.report.AuditRecorder;
+import dev.a11yagent.core.rules.InPageEngine;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -40,6 +45,7 @@ public final class Auditor {
     private final ArtifactStore artifacts;
     private final Judge judge;
     private Consumer<String> progress = s -> { };
+    private AuditRecorder recorder;
 
     public Auditor(PageDriver driver, A11yConfig config) {
         this.driver = driver;
@@ -64,10 +70,11 @@ public final class Auditor {
 
     public AuditReport auditPage(String name) {
         Instant start = Instant.now();
+        beginRecording();
         List<Rule> rules = enabledPageRules();
-        PageAudit page = auditState(name, rules, null);
+        PageAudit page = enrich(auditState(name, rules, null));
         return new AuditReport(name, start, Instant.now(), config.targetVersion(), config.targetLevel(),
-                ruleIds(rules), List.of(page), List.of());
+                ruleIds(rules), List.of(page), List.of(), aiModel(), endRecording());
     }
 
     /**
@@ -84,13 +91,39 @@ public final class Auditor {
                         .message("No automated rule covers " + c.get() + "; manual evaluation required.")
                         .evidence(Evidence.deterministic("not covered")).url(driver.url()).build();
                 PageAudit page = new PageAudit("page", driver.url(), driver.title(), null, List.of(none));
-                return new AuditReport("check " + ruleOrCriterion, start, Instant.now(), config.targetVersion(), config.targetLevel(), Set.of(), List.of(page), List.of());
+                return new AuditReport("check " + ruleOrCriterion, start, Instant.now(), config.targetVersion(), config.targetLevel(), Set.of(), List.of(page), List.of(), aiModel(), null);
             }
             throw new IllegalArgumentException("Unknown rule or success criterion: " + ruleOrCriterion);
         }
-        PageAudit page = auditState("page", rules, null);
+        beginRecording();
+        PageAudit page = enrich(auditState("page", rules, null, null));
         return new AuditReport("check " + ruleOrCriterion, start, Instant.now(), config.targetVersion(), config.targetLevel(),
-                ruleIds(rules), List.of(page), List.of());
+                ruleIds(rules), List.of(page), List.of(), aiModel(), endRecording());
+    }
+
+    /**
+     * Runs a check while observing DOM/focus/live-region changes during {@code action}. Use for criteria
+     * that depend on submit, navigation, or other transitions (3.3.1, 4.1.3).
+     */
+    public AuditReport observe(String ruleOrCriterion, Runnable action) {
+        Instant start = Instant.now();
+        List<Rule> rules = resolvePageRules(ruleOrCriterion);
+        if (rules.isEmpty()) {
+            Optional<Criterion> c = Wcag.find(ruleOrCriterion);
+            if (c.isPresent()) {
+                Finding none = Finding.builder("coverage").criteria(Set.of(c.get())).outcome(Outcome.CANT_TELL).impact(Impact.MINOR)
+                        .message("No automated rule covers " + c.get() + "; manual evaluation required.")
+                        .evidence(Evidence.deterministic("not covered")).url(driver.url()).build();
+                PageAudit page = new PageAudit("page", driver.url(), driver.title(), null, List.of(none));
+                return new AuditReport("observe " + ruleOrCriterion, start, Instant.now(), config.targetVersion(), config.targetLevel(), Set.of(), List.of(page), List.of(), aiModel(), null);
+            }
+            throw new IllegalArgumentException("Unknown rule or success criterion: " + ruleOrCriterion);
+        }
+        beginRecording();
+        Observation observation = captureObservation(action);
+        PageAudit page = enrich(auditState("observe", rules, null, observation));
+        return new AuditReport("observe " + ruleOrCriterion, start, Instant.now(), config.targetVersion(), config.targetLevel(),
+                ruleIds(rules), List.of(page), List.of(), aiModel(), endRecording());
     }
 
     /**
@@ -107,6 +140,7 @@ public final class Auditor {
     /** Runs a journey: audits the landing page (if a start URL is set) and every step, then cross-step rules. */
     public AuditReport runJourney(Journey journey) {
         Instant start = Instant.now();
+        beginRecording();
         List<Rule> rules = enabledPageRules();
         List<PageAudit> pages = new ArrayList<>();
         List<StepSnapshot> snapshots = new ArrayList<>();
@@ -117,8 +151,8 @@ public final class Auditor {
         }
         for (Journey.Step step : journey.steps()) {
             progress.accept("step " + step.name());
-            step.action().run();
-            pages.add(auditState(step.name(), rules, snapshots));
+            Observation observation = captureObservation(step.action());
+            pages.add(auditState(step.name(), rules, snapshots, observation));
         }
         List<Finding> journeyFindings = new ArrayList<>();
         Set<String> ran = new LinkedHashSet<>(ruleIds(rules));
@@ -134,12 +168,21 @@ public final class Auditor {
                 journeyFindings.add(error(jr.id(), jr.criteria(), e, null));
             }
         }
-        return new AuditReport(journey.name(), start, Instant.now(), config.targetVersion(), config.targetLevel(), ran, pages, journeyFindings);
+        List<PageAudit> reviewed = new ArrayList<>(pages.size());
+        for (PageAudit page : pages) {
+            reviewed.add(enrich(page));
+        }
+        return new AuditReport(journey.name(), start, Instant.now(), config.targetVersion(), config.targetLevel(),
+                ran, reviewed, enrichFindings(journeyFindings), aiModel(), endRecording());
     }
 
     /** Public so adapters can build custom flows (e.g. audit after each Playwright navigation). */
     public PageAudit auditState(String stepName, List<Rule> rules, List<StepSnapshot> snapshots) {
-        RuleContext ctx = new RuleContext(driver, config, judge, artifacts, stepName);
+        return auditState(stepName, rules, snapshots, null);
+    }
+
+    public PageAudit auditState(String stepName, List<Rule> rules, List<StepSnapshot> snapshots, Observation observation) {
+        RuleContext ctx = new RuleContext(driver, config, judge, artifacts, stepName, recorder, observation);
         String url = driver.url();
         String title = driver.title();
         String shot = null;
@@ -150,9 +193,15 @@ public final class Auditor {
                 // screenshots are best effort
             }
         }
+        if (recorder != null) {
+            recorder.capture();
+        }
         List<Finding> findings = new ArrayList<>();
         for (Rule rule : rules) {
             progress.accept("rule " + rule.id());
+            if (recorder != null) {
+                recorder.capture();
+            }
             try {
                 for (Finding f : rule.evaluate(ctx)) {
                     findings.add(f.inStep(stepName, f.url() == null ? url : f.url()));
@@ -196,6 +245,52 @@ public final class Auditor {
         Set<String> ids = new LinkedHashSet<>();
         rules.forEach(r -> ids.add(r.id()));
         return ids;
+    }
+
+    private PageAudit enrich(PageAudit page) {
+        return page.withFindings(enrichFindings(page.findings()));
+    }
+
+    private List<Finding> enrichFindings(List<Finding> findings) {
+        if (judge == null || !config.videoEnrichment()) {
+            return findings;
+        }
+        if (findings.stream().noneMatch(VideoEnrichment::isLeftover)) {
+            return findings;
+        }
+        progress.accept("recording review");
+        List<byte[]> frames = recorder == null ? List.of() : recorder.sample(VideoEnrichment.MAX_FRAMES);
+        return VideoEnrichment.apply(judge, findings, frames, artifacts);
+    }
+
+    private String aiModel() {
+        return config.modelClient().map(ModelClient::id).orElse(null);
+    }
+
+    private Observation captureObservation(Runnable action) {
+        InPageEngine page = new InPageEngine(driver);
+        page.ensureInstalled();
+        page.call("observeStart", Map.of());
+        try {
+            action.run();
+            driver.waitMillis(350);
+        } finally {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> raw = (Map<String, Object>) page.call("observeStop", Map.of());
+            return Observation.fromMap(raw);
+        }
+    }
+
+    private void beginRecording() {
+        recorder = config.recordVideo() ? new AuditRecorder(driver, artifacts.root()) : null;
+    }
+
+    private String endRecording() {
+        try {
+            return recorder == null ? null : recorder.finish().orElse(null);
+        } finally {
+            recorder = null;
+        }
     }
 
     private static Finding error(String ruleId, Set<Criterion> criteria, RuntimeException e, String url) {

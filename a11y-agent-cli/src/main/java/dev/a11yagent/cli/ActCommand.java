@@ -179,6 +179,7 @@ final class ActCommand implements Callable<Integer> {
                 .targetVersion(WcagVersion.V2_2)
                 .targetLevel(Level.AAA)
                 .screenshots(false)
+                .recordVideo(false)
                 .artifactsDir(out.resolve("artifacts"))
                 .maxFocusStops(60)
                 .build();

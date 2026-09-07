@@ -63,13 +63,15 @@ class InPageRulesTest extends BrowserTestBase {
     void labelInNameFlagsMismatch() {
         List<Finding> failed = findings(bad, "label-in-name", Outcome.FAILED);
         assertEquals(1, failed.size(), () -> failed.toString());
-        assertTrue(failed.get(0).message().contains("send message"));
+        assertTrue(failed.get(0).message().toLowerCase().contains("send message"));
     }
 
     @Test
     void movingContentAndTimingAreFlagged() {
         assertTrue(findings(bad, "pause-stop-hide", Outcome.FAILED).stream().anyMatch(f -> f.message().contains("marquee")));
-        assertEquals(1, findings(bad, "timing-adjustable", Outcome.FAILED).size());
+        List<Finding> timing = findings(bad, "timing-adjustable", Outcome.FAILED);
+        assertTrue(timing.stream().anyMatch(f -> f.message().contains("600")), () -> timing.toString());
+        assertEquals(2, timing.size(), () -> timing.toString());
     }
 
     @Test
@@ -92,6 +94,23 @@ class InPageRulesTest extends BrowserTestBase {
         List<Finding> failed = findings(bad, "headings-and-labels-descriptive", Outcome.FAILED);
         assertTrue(failed.stream().anyMatch(f -> f.message().contains("\"Heading\"")), () -> failed.toString());
         assertTrue(failed.stream().anyMatch(f -> f.message().contains("\"Field\"")), () -> failed.toString());
+    }
+
+    @Test
+    void labelsOrInstructionsFlagsPlaceholderOnlyFields() {
+        List<Finding> failed = findings(bad, "labels-or-instructions", Outcome.FAILED);
+        assertTrue(failed.stream().anyMatch(f -> f.message().contains("placeholder") && f.target().html().contains("placeholder-only")),
+                () -> failed.toString());
+        page.navigate(server.url("/good.html"));
+        assertTrue(findings(agent().audit("good"), "labels-or-instructions", Outcome.PASSED).stream()
+                .anyMatch(f -> f.target().html().contains("email")));
+    }
+
+    @Test
+    void checkByCriterion332RunsLabelsRule() {
+        page.navigate(server.url("/good.html"));
+        AuditReport r = agent().check("3.3.2");
+        assertFalse(r.allFindings().stream().anyMatch(f -> f.outcome() == Outcome.CANT_TELL && f.ruleId().equals("coverage")));
     }
 
     @Test

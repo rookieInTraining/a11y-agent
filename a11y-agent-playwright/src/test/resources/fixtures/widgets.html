@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Widget trap fixture</title>
+<style>
+  body { font: 16px/1.5 Arial, sans-serif; margin: 24px; }
+  #cal { margin-top: 8px; padding: 8px; border: 1px solid #999; display: none; }
+  #cal button { margin: 4px; min-width: 44px; min-height: 44px; }
+</style>
+</head>
+<body>
+<main>
+  <a href="/first">First link</a>
+  <button type="button" id="open-cal">Pick a date</button>
+  <div id="cal" role="dialog" aria-label="Calendar">
+    <button type="button" id="day1">1</button>
+    <button type="button" id="day2">2</button>
+  </div>
+  <a href="/last">Last link</a>
+</main>
+<script>
+document.getElementById('open-cal').addEventListener('click', function () {
+  document.getElementById('cal').style.display = 'block';
+  document.getElementById('day1').focus();
+});
+document.getElementById('day2').addEventListener('keydown', function (e) {
+  if (e.key === 'Tab') e.preventDefault();
+});
+</script>
+</body>
+</html>

@@ -37,7 +37,11 @@ public final class ActCorpus implements AutoCloseable {
 
     private final Path root;
     private final ObjectMapper json = new ObjectMapper();
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).followRedirects(HttpClient.Redirect.NORMAL).build();
+    private final HttpClient http = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
+            .connectTimeout(Duration.ofSeconds(20))
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .build();
     private HttpServer server;
     private String baseUrl;
 
@@ -73,6 +77,21 @@ public final class ActCorpus implements AutoCloseable {
                 pending.add(PREFIX + c.relativePath());
             }
             download(pending, refresh, 3);
+            List<String> missing = new ArrayList<>();
+            for (String p : pending) {
+                if (!Files.isRegularFile(toLocal(p))) {
+                    missing.add(p);
+                }
+            }
+            if (!missing.isEmpty()) {
+                System.out.printf("Retrying %d missing test case pages sequentially...%n", missing.size());
+                System.out.flush();
+                for (String p : missing) {
+                    fetchOne(p, true);
+                }
+            }
+            long have = pending.stream().filter(p -> Files.isRegularFile(toLocal(p))).count();
+            System.out.printf("Corpus cache: %d/%d test case pages on disk.%n", have, pending.size());
             return cases;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -85,7 +104,7 @@ public final class ActCorpus implements AutoCloseable {
         List<String> level = new ArrayList<>(paths);
         for (int d = 0; d < depth && !level.isEmpty(); d++) {
             List<String> next = new ArrayList<>();
-            var pool = Executors.newFixedThreadPool(12);
+            var pool = Executors.newFixedThreadPool(4);
             List<java.util.concurrent.Future<String>> futures = new ArrayList<>();
             for (String p : level) {
                 futures.add(pool.submit(() -> fetchOne(p, refresh)));
@@ -114,23 +133,54 @@ public final class ActCorpus implements AutoCloseable {
 
     /** Returns the body when the resource is HTML (so references can be followed), null otherwise. */
     private String fetchOne(String waiPath, boolean refresh) {
-        Path target = root.resolve(waiPath.substring(PREFIX.length()));
+        Path target = toLocal(waiPath);
         try {
-            if (!refresh && Files.exists(target)) {
+            if (!refresh && Files.isRegularFile(target)) {
                 return isHtml(target) ? Files.readString(target) : null;
             }
-            Files.createDirectories(target.getParent());
-            HttpResponse<byte[]> resp = http.send(
-                    HttpRequest.newBuilder(URI.create(W3C + waiPath)).timeout(Duration.ofSeconds(60)).GET().build(),
-                    HttpResponse.BodyHandlers.ofByteArray());
-            if (resp.statusCode() / 100 != 2) {
+            byte[] body = null;
+            for (int attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    HttpResponse<byte[]> resp = http.send(
+                            HttpRequest.newBuilder(URI.create(W3C + waiPath))
+                                    .timeout(Duration.ofSeconds(15))
+                                    .header("User-Agent", "a11y-agent-benchmark/0.1 (ACT corpus mirror)")
+                                    .GET()
+                                    .build(),
+                            HttpResponse.BodyHandlers.ofByteArray());
+                    int code = resp.statusCode();
+                    if (code / 100 == 2) {
+                        body = resp.body();
+                        break;
+                    }
+                    if (code == 404) {
+                        return null; // some cases intentionally reference missing assets
+                    }
+                } catch (Exception ignored) {
+                    // retry below
+                }
+                Thread.sleep(150L * attempt);
+            }
+            if (body == null) {
                 return null;
             }
-            Files.write(target, resp.body());
-            return isHtml(target) ? new String(resp.body(), StandardCharsets.UTF_8) : null;
+            Files.createDirectories(target.getParent());
+            Files.write(target, body);
+            return isHtml(target) ? new String(body, StandardCharsets.UTF_8) : null;
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private Path toLocal(String waiPath) {
+        String rel = waiPath.startsWith(PREFIX) ? waiPath.substring(PREFIX.length()) : waiPath;
+        Path p = root;
+        for (String part : rel.split("/")) {
+            if (!part.isEmpty()) {
+                p = p.resolve(part);
+            }
+        }
+        return p;
     }
 
     private static boolean isHtml(Path p) {
@@ -139,7 +189,13 @@ public final class ActCorpus implements AutoCloseable {
     }
 
     private static String localPath(String url) {
-        return URI.create(url).getPath().substring(PREFIX.length() + 1);
+        String path = URI.create(url).getPath();
+        return path.startsWith(PREFIX) ? path.substring(PREFIX.length()) : path.replaceFirst("^.*/", "");
+    }
+
+    /** Base URL of the local server, or null until {@link #serve()} has been called. */
+    public String baseUrl() {
+        return baseUrl;
     }
 
     private String get(String url) throws IOException {
@@ -168,13 +224,17 @@ public final class ActCorpus implements AutoCloseable {
                 String path = exchange.getRequestURI().getPath();
                 byte[] body;
                 int status = 200;
-                Path file = path.startsWith(PREFIX) ? root.resolve(path.substring(PREFIX.length())) : null;
+                Path file = path.startsWith(PREFIX) ? toLocal(path) : null;
                 if (file != null && Files.isDirectory(file)) {
                     file = file.resolve("index.html");
                 }
                 if (file != null && Files.isRegularFile(file) && file.normalize().startsWith(root.normalize())) {
                     body = Files.readAllBytes(file);
-                    exchange.getResponseHeaders().add("Content-Type", contentType(file));
+                    String type = contentType(file);
+                    if (type.startsWith("text/html")) {
+                        body = stampMetaRefresh(body);
+                    }
+                    exchange.getResponseHeaders().add("Content-Type", type);
                 } else {
                     status = 404;
                     body = "<!doctype html><html lang=\"en\"><head><title>Not found</title></head><body><p>404</p></body></html>".getBytes(StandardCharsets.UTF_8);
@@ -192,6 +252,76 @@ public final class ActCorpus implements AutoCloseable {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    /**
+     * Chromium treats {@code <meta http-equiv=refresh>} as a parser pragma: it may navigate away
+     * (aborted by the corpus network filter) or drop the tag from the live DOM before the audit runs.
+     * Copy the declared content onto {@code <html>} and rename the pragma so the in-page rule can still
+     * see it without the browser consuming it.
+     */
+    static byte[] stampMetaRefresh(byte[] body) {
+        String html = new String(body, StandardCharsets.UTF_8);
+        Matcher tags = Pattern.compile("(?is)<meta\\b[^>]*>").matcher(html);
+        StringBuilder contents = new StringBuilder();
+        while (tags.find()) {
+            String tag = tags.group();
+            if (!Pattern.compile("(?is)http-equiv\\s*=\\s*['\"]?refresh['\"]?").matcher(tag).find()) {
+                continue;
+            }
+            Matcher cm = Pattern.compile("(?is)\\bcontent\\s*=\\s*['\"]([^'\"]*)['\"]").matcher(tag);
+            String content = cm.find() ? cm.group(1) : null;
+            if (content == null) {
+                cm = Pattern.compile("(?is)\\bcontent\\s*=\\s*([^\\s>]+)").matcher(tag);
+                if (cm.find()) {
+                    content = cm.group(1);
+                }
+            }
+            if (content != null) {
+                if (contents.length() > 0) {
+                    contents.append('\n');
+                }
+                contents.append(content);
+            }
+        }
+        if (contents.length() == 0) {
+            return body;
+        }
+        String attr = contents.toString()
+                .replace("&", "&amp;")
+                .replace("\"", "&quot;")
+                .replace("\n", "&#10;");
+        Matcher htmlTag = Pattern.compile("(?is)<html\\b([^>]*)>").matcher(html);
+        String stamped;
+        if (htmlTag.find()) {
+            stamped = html.substring(0, htmlTag.start())
+                    + "<html data-a11y-meta-refresh=\"" + attr + "\"" + htmlTag.group(1) + ">"
+                    + html.substring(htmlTag.end());
+        } else {
+            stamped = "<html data-a11y-meta-refresh=\"" + attr + "\">" + html;
+        }
+        stamped = Pattern.compile("(?i)(http-equiv\\s*=\\s*)(['\"]?)refresh\\2")
+                .matcher(stamped)
+                .replaceAll("$1$2x-a11y-refresh$2");
+        String[] parts = contents.toString().split("\n", -1);
+        StringBuilder payload = new StringBuilder("[");
+        for (int i = 0; i < parts.length; i++) {
+            if (i > 0) {
+                payload.append(',');
+            }
+            payload.append('"')
+                    .append(parts[i].replace("\\", "\\\\").replace("\"", "\\\""))
+                    .append('"');
+        }
+        payload.append(']');
+        String injection = "<script type=\"application/json\" id=\"a11y-agent-meta-refresh\">" + payload + "</script>";
+        Matcher head = Pattern.compile("(?is)<head\\b[^>]*>").matcher(stamped);
+        if (head.find()) {
+            stamped = stamped.substring(0, head.end()) + injection + stamped.substring(head.end());
+        } else {
+            stamped = injection + stamped;
+        }
+        return stamped.getBytes(StandardCharsets.UTF_8);
     }
 
     public String urlFor(ActTestCase c) {

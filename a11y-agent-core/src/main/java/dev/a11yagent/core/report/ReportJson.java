@@ -13,6 +13,7 @@ import dev.a11yagent.core.model.Impact;
 import dev.a11yagent.core.model.Outcome;
 import dev.a11yagent.core.model.PageAudit;
 import dev.a11yagent.core.model.Target;
+import dev.a11yagent.core.rules.Rules;
 import dev.a11yagent.core.wcag.Criterion;
 import dev.a11yagent.core.wcag.Level;
 import dev.a11yagent.core.wcag.Wcag;
@@ -76,6 +77,11 @@ public final class ReportJson {
         for (Outcome o : Outcome.values()) {
             summary.put(o.name().toLowerCase(), r.count(o));
         }
+        ObjectNode ai = root.putObject("ai");
+        ai.put("configured", r.aiConfigured());
+        ai.put("model", r.aiModel());
+        ai.put("judgements", r.aiJudgements().size());
+        root.put("video", r.video());
         ArrayNode pages = root.putArray("pages");
         for (PageAudit p : r.pages()) {
             ObjectNode pn = pages.addObject();
@@ -116,6 +122,8 @@ public final class ReportJson {
         e.put("rationale", f.evidence().rationale());
         e.put("model", f.evidence().model());
         e.put("confidence", f.evidence().confidence());
+        e.put("aiJudged", f.evidence().aiJudged());
+        e.put("analysis", Rules.ofFinding(f).name());
         e.set("data", JSON.valueToTree(f.evidence().data()));
         return n;
     }
@@ -133,13 +141,15 @@ public final class ReportJson {
             root.path("journeyFindings").forEach(fn -> jf.add(readFinding(fn)));
             Set<String> rules = new LinkedHashSet<>();
             root.path("rulesRun").forEach(x -> rules.add(x.asText()));
+            String aiModel = text(root.path("ai"), "model");
+            String video = text(root, "video");
             return new AuditReport(
                     root.path("name").asText(),
                     Instant.parse(root.path("startedAt").asText()),
                     Instant.parse(root.path("finishedAt").asText()),
                     WcagVersion.parse(root.path("targetVersion").asText("2.2")),
                     Level.valueOf(root.path("targetLevel").asText("AAA")),
-                    rules, pages, jf);
+                    rules, pages, jf, aiModel, video);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
