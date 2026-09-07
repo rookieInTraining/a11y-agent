@@ -20,6 +20,8 @@ import java.util.stream.Stream;
  * @param rulesRun        ids of the rules that were executed
  * @param pages           per page-state results
  * @param journeyFindings findings produced by cross-step rules (empty for single-page audits)
+ * @param aiModel         configured vision/language model id, or {@code null} when AI was off
+ * @param video           relative path of the WebM recording, or {@code null}
  */
 public record AuditReport(
         String name,
@@ -29,12 +31,45 @@ public record AuditReport(
         Level targetLevel,
         Set<String> rulesRun,
         List<PageAudit> pages,
-        List<Finding> journeyFindings) {
+        List<Finding> journeyFindings,
+        String aiModel,
+        String video) {
 
     public AuditReport {
         pages = List.copyOf(pages);
         journeyFindings = List.copyOf(journeyFindings);
         rulesRun = Set.copyOf(rulesRun);
+        if (aiModel != null && aiModel.isBlank()) {
+            aiModel = null;
+        }
+        if (video != null && video.isBlank()) {
+            video = null;
+        }
+    }
+
+    public AuditReport(
+            String name,
+            Instant startedAt,
+            Instant finishedAt,
+            WcagVersion targetVersion,
+            Level targetLevel,
+            Set<String> rulesRun,
+            List<PageAudit> pages,
+            List<Finding> journeyFindings) {
+        this(name, startedAt, finishedAt, targetVersion, targetLevel, rulesRun, pages, journeyFindings, null, null);
+    }
+
+    public AuditReport(
+            String name,
+            Instant startedAt,
+            Instant finishedAt,
+            WcagVersion targetVersion,
+            Level targetLevel,
+            Set<String> rulesRun,
+            List<PageAudit> pages,
+            List<Finding> journeyFindings,
+            String aiModel) {
+        this(name, startedAt, finishedAt, targetVersion, targetLevel, rulesRun, pages, journeyFindings, aiModel, null);
     }
 
     /** Every finding from every page plus journey-level findings. */
@@ -60,5 +95,18 @@ public record AuditReport(
 
     public boolean hasFailures() {
         return allFindings().stream().anyMatch(f -> f.outcome() == Outcome.FAILED);
+    }
+
+    public boolean aiConfigured() {
+        return aiModel != null;
+    }
+
+    /** Findings whose evidence was produced by a vision/language model. */
+    public List<Finding> aiJudgements() {
+        return allFindings().stream().filter(f -> f.evidence().aiJudged()).toList();
+    }
+
+    public boolean hasVideo() {
+        return video != null;
     }
 }

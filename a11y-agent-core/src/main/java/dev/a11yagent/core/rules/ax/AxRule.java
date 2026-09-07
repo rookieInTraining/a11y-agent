@@ -51,6 +51,11 @@ public abstract class AxRule implements Rule {
     }
 
     @Override
+    public Impact impact() {
+        return impact;
+    }
+
+    @Override
     public List<Finding> evaluate(RuleContext ctx) {
         return ctx.axTree()
                 .map(tree -> evaluate(ctx, tree))

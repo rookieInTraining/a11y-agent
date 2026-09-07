@@ -1,7 +1,7 @@
 package dev.a11yagent.core.rules;
 
-import dev.a11yagent.core.ax.AxNode;
 import dev.a11yagent.core.journey.JourneyRule;
+import dev.a11yagent.core.model.Finding;
 import dev.a11yagent.core.journey.rules.ConsistentHelpRule;
 import dev.a11yagent.core.journey.rules.ConsistentIdentificationRule;
 import dev.a11yagent.core.journey.rules.ConsistentNavigationRule;
@@ -123,6 +123,9 @@ public final class Rules {
         // Understandable
         add(new InPageRule("accessible-authentication-minimum", "Authentication does not require a cognitive function test (paste allowed, password managers allowed, CAPTCHA alternatives).", sc("3.3.8"), Impact.SERIOUS));
         add(new InPageRule("accessible-authentication-enhanced", "Authentication has no cognitive function test, including object recognition (AAA).", sc("3.3.9"), Impact.MODERATE));
+        add(new InPageRule("labels-or-instructions", "Form controls have a programmatic label or instructions (label association or aria-label/aria-labelledby; placeholder and title do not count).", sc("3.3.2"), Impact.SERIOUS));
+        add(new InPageRule("error-identification", "When an input error is detected, it is programmatically identified and described to assistive technology.", sc("3.3.1"), Impact.SERIOUS));
+        add(new InPageRule("status-messages", "Status messages that update content are exposed through role=status/alert or aria-live without moving focus.", sc("4.1.3"), Impact.MODERATE));
 
         for (JourneyRule r : List.of(new ConsistentNavigationRule(), new ConsistentIdentificationRule(), new ConsistentHelpRule(), new RedundantEntryRule())) {
             JOURNEY_RULES.put(r.id(), r);
@@ -146,6 +149,23 @@ public final class Rules {
 
     public static Optional<JourneyRule> journeyRule(String id) {
         return Optional.ofNullable(JOURNEY_RULES.get(id));
+    }
+
+    /** How the named rule uses a vision/language model. Unknown ids are {@link AiAssist#NONE}. */
+    public static AiAssist aiAssist(String id) {
+        return pageRule(id).map(Rule::aiAssist).orElse(AiAssist.NONE);
+    }
+
+    /**
+     * How <em>this finding</em> was produced. A heuristic failure on an AI-only rule is still
+     * {@link AiAssist#NONE}; only evidence with a model id is {@link AiAssist#AI_ONLY} or
+     * {@link AiAssist#ENHANCED}.
+     */
+    public static AiAssist ofFinding(Finding f) {
+        if (!f.evidence().aiJudged()) {
+            return AiAssist.NONE;
+        }
+        return aiAssist(f.ruleId()) == AiAssist.AI_ONLY ? AiAssist.AI_ONLY : AiAssist.ENHANCED;
     }
 
     public static boolean exists(String id) {

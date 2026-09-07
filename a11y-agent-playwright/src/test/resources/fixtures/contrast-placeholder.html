@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Placeholder contrast fixture</title>
+<style>
+  body { font: 16px/1.5 Arial, sans-serif; margin: 24px; color: #111; background: #fff; }
+  nav a { color: #767676; text-decoration: none; }
+  input::placeholder { color: #ccc; }
+  #email { width: 240px; padding: 8px; font-size: 16px; border: 1px solid #ccc; background: #fff; }
+</style>
+</head>
+<body>
+<nav><a href="/">Home</a> <a href="/about">About</a></nav>
+<main>
+  <h1>Login</h1>
+  <label for="email">Email</label>
+  <input id="email" type="email" placeholder="you@example.com">
+</main>
+</body>
+</html>

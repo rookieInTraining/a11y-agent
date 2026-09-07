@@ -5,6 +5,7 @@ import dev.a11yagent.core.model.Evidence;
 import dev.a11yagent.core.model.Finding;
 import dev.a11yagent.core.model.Impact;
 import dev.a11yagent.core.model.Outcome;
+import dev.a11yagent.core.rules.AiAssist;
 import dev.a11yagent.core.rules.Findings;
 import dev.a11yagent.core.rules.RuleContext;
 import dev.a11yagent.core.wcag.Wcag;
@@ -26,12 +27,19 @@ public final class FocusVisibleRule extends RuntimeRule {
             "borderTopColor", "borderTopWidth", "borderTopStyle", "borderBottomColor", "backgroundColor", "textDecorationLine",
             "before.outlineStyle", "before.boxShadow", "before.borderTopWidth", "before.backgroundColor", "before.display",
             "after.outlineStyle", "after.boxShadow", "after.borderTopWidth", "after.backgroundColor", "after.display",
-            "parent.outlineStyle", "parent.boxShadow", "parent.backgroundColor", "parent.borderTopColor");
+            "parent.outlineStyle", "parent.boxShadow", "parent.backgroundColor", "parent.borderTopColor",
+            "prev.backgroundColor", "prev.borderTopWidth", "prev.borderTopStyle", "prev.boxShadow", "prev.outlineStyle", "prev.display",
+            "next.backgroundColor", "next.borderTopWidth", "next.borderTopStyle", "next.boxShadow", "next.outlineStyle", "next.display");
 
     public FocusVisibleRule() {
         super("focus-visible",
                 "Every keyboard focus stop has a visible focus indicator (computed-style diff between unfocused and focused state, vision model for ambiguous cases).",
                 Set.of(Wcag.get("2.4.7")), Impact.SERIOUS);
+    }
+
+    @Override
+    public AiAssist aiAssist() {
+        return AiAssist.ENHANCED;
     }
 
     @Override
@@ -60,6 +68,12 @@ public final class FocusVisibleRule extends RuntimeRule {
                 continue;
             }
             if (changed.isEmpty()) {
+                String html = stop.html() == null ? "" : stop.html().toLowerCase();
+                if (html.contains("onfocus") || html.contains("onfocusin")) {
+                    out.add(stopFinding(Outcome.CANT_TELL, stop,
+                            "No computed-style change on the focused element itself, but it has an onfocus handler that may paint an indicator on a sibling or elsewhere.", data, url));
+                    continue;
+                }
                 Finding f = stopFinding(Outcome.FAILED, stop,
                         "No visual change when this element receives keyboard focus (outline: " + stop.focusedStyles().get("outlineStyle") + "). Users cannot see where focus is.", data, url);
                 out.add(shots++ < 15 ? withShot(ctx, f) : f);

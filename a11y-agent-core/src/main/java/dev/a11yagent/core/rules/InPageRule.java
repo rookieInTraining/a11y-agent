@@ -37,6 +37,7 @@ public class InPageRule implements Rule {
         return criteria;
     }
 
+    @Override
     public Impact impact() {
         return impact;
     }
@@ -48,7 +49,7 @@ public class InPageRule implements Rule {
 
     @Override
     public List<Finding> evaluate(RuleContext ctx) {
-        List<Map<String, Object>> raw = ctx.inPage().runRule(id, Map.of());
+        List<Map<String, Object>> raw = ctx.inPage().runRule(id, ctx.ruleOptions());
         List<Finding> findings = Findings.fromRaw(id, criteria, impact, raw, ctx.driver().url());
         return Findings.attachScreenshots(ctx, postProcess(ctx, findings));
     }

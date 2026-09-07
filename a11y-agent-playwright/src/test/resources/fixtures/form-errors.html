@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Form errors fixture</title>
+<style>
+  body { font: 16px/1.5 Arial, sans-serif; margin: 24px; }
+  .error-border { border: 2px solid red !important; }
+  .success { color: green; font-weight: bold; margin-top: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Registration</h1>
+  <form id="blocked" action="/success" method="get" onsubmit="return onSubmit(event)">
+    <label for="name">Name</label>
+    <input id="name" name="name" type="text">
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email">
+    <button type="submit" id="submit">Submit</button>
+  </form>
+  <div id="success" class="success" hidden>Thank you — your registration was received.</div>
+</main>
+<script>
+function onSubmit(e) {
+  var name = document.getElementById('name');
+  var email = document.getElementById('email');
+  if (!name.value.trim() || !email.value.trim()) {
+    e.preventDefault();
+    name.classList.add('error-border');
+    email.classList.add('error-border');
+    return false;
+  }
+  e.preventDefault();
+  document.getElementById('blocked').hidden = true;
+  document.getElementById('success').hidden = false;
+  return false;
+}
+</script>
+</body>
+</html>

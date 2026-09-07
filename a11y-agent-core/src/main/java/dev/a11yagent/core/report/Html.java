@@ -39,16 +39,23 @@ public final class Html {
             code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .9em; }
             pre { white-space: pre-wrap; word-break: break-word; background: rgba(127,127,127,.1); padding: .5rem; border-radius: 4px; }
             .badge { display: inline-block; padding: .1rem .5rem; border-radius: 999px; font-weight: 600; font-size: .85em; border: 1px solid currentColor; }
+            .badge.AI_ONLY, .badge.ENHANCED { color: var(--info); }
+            .badge.NONE { color: var(--muted); }
             .FAILED { color: var(--fail); } .NEEDS_REVIEW, .CANT_TELL { color: var(--warn); } .PASSED { color: var(--pass); } .INAPPLICABLE { color: var(--muted); }
             .Supports { color: var(--pass); } .Partially, .PartiallySupports { color: var(--warn); } .DoesNot, .DoesNotSupport { color: var(--fail); } .NotApplicable, .NotEvaluated { color: var(--muted); }
             a:focus-visible, button:focus-visible, summary:focus-visible, [tabindex]:focus-visible { outline: 3px solid var(--info); outline-offset: 2px; }
             details { border: 1px solid var(--line); border-radius: 6px; padding: .5rem .8rem; margin: .6rem 0; }
             summary { cursor: pointer; font-weight: 600; }
-            img.shot { max-width: 100%; height: auto; border: 1px solid var(--line); }
+            img.shot { max-width: 100%; max-height: 28rem; height: auto; object-fit: contain; border: 1px solid var(--line); background: #111; }
+            figure.shot { margin: .8rem 0; }
+            figure.shot figcaption { font-size: .9em; color: var(--muted); margin-top: .35rem; }
+            video.audit { width: 100%; max-height: 28rem; background: #111; border: 1px solid var(--line); border-radius: 6px; }
             .muted { color: var(--muted); }
             .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .8rem; }
             .card { border: 1px solid var(--line); border-radius: 6px; padding: .8rem; }
             .card strong { font-size: 1.6rem; display: block; }
+            .ai-callout { border-left: 4px solid var(--info); padding: .2rem 0 .2rem 1rem; margin: 1rem 0; }
+            blockquote.ai { margin: .6rem 0; padding: .6rem .8rem; border-left: 4px solid var(--info); background: rgba(47,79,143,.08); }
             @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
             """;
 }

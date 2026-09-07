@@ -30,6 +30,12 @@ class CommonOptions {
     @Option(names = "--no-screenshots", description = "Do not capture evidence screenshots.")
     boolean noScreenshots;
 
+    @Option(names = "--no-video", description = "Do not record a WebM of the audit.")
+    boolean noVideo;
+
+    @Option(names = "--no-video-enrichment", description = "Do not review leftover findings against recording frames after the run.")
+    boolean noVideoEnrichment;
+
     @Option(names = "--headed", description = "Run the browser with a visible window.")
     boolean headed;
 
@@ -41,6 +47,9 @@ class CommonOptions {
 
     @Option(names = "--exclude", split = ",", description = "Skip these rule ids.")
     Set<String> exclude = Set.of();
+
+    @Option(names = "--scope", description = "Only evaluate in-page targets inside this CSS selector (e.g. main).")
+    String scope;
 
     @Option(names = "--max-focus-stops", description = "Maximum Tab presses for keyboard probes (default: ${DEFAULT-VALUE}).", defaultValue = "150")
     int maxFocusStops;
@@ -57,9 +66,14 @@ class CommonOptions {
                 .targetLevel(level)
                 .artifactsDir(out)
                 .screenshots(!noScreenshots)
+                .recordVideo(!noVideo)
+                .videoEnrichment(!noVideoEnrichment)
                 .maxFocusStops(maxFocusStops)
                 .includeRules(include)
                 .excludeRules(exclude);
+        if (scope != null && !scope.isBlank()) {
+            b.scopeSelector(scope.trim());
+        }
         if (ai) {
             b.modelClient(ModelClients.fromEnv().orElseThrow(() -> new IllegalStateException(
                     "--ai requested but no model configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or A11Y_AI_PROVIDER=ollama.")));
@@ -82,6 +96,11 @@ class CommonOptions {
                 f.outcome(), f.ruleId(), f.criteria().stream().map(c -> c.id()).sorted().reduce((a, c) -> a + "," + c).orElse(""),
                 f.step() != null ? " @" + f.step() : "", f.message()));
         System.out.println("Report: " + out.resolve("report.html").toAbsolutePath());
+        if (report.hasVideo()) {
+            System.out.println("Video:  " + out.resolve(report.video()).toAbsolutePath());
+        } else if (!noVideo) {
+            System.out.println("Video skipped (install ffmpeg on PATH or set A11Y_FFMPEG)");
+        }
         boolean fail = report.allFindings().stream().anyMatch(f -> f.outcome() == Outcome.FAILED
                 || (failOn == Outcome.NEEDS_REVIEW && f.outcome() == Outcome.NEEDS_REVIEW));
         return fail ? 2 : 0;

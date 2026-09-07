@@ -44,6 +44,10 @@ public record Finding(
         return new Finding(ruleId, criteria, o, impact, newMessage, target, evidence, step, url);
     }
 
+    public Finding withImpact(Impact i) {
+        return new Finding(ruleId, criteria, outcome, i, message, target, evidence, step, url);
+    }
+
     public static Builder builder(String ruleId) {
         return new Builder(ruleId);
     }

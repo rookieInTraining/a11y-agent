@@ -13,6 +13,7 @@ import dev.a11yagent.core.rules.RuleContext;
 import dev.a11yagent.core.rules.RuleKind;
 import dev.a11yagent.core.wcag.Criterion;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -52,6 +53,8 @@ public final class AxNameRule extends InPageRule {
         AxTree tree = ctx.axTree().get();
         String url = ctx.driver().url();
         List<Finding> out = new ArrayList<>();
+        Set<String> covered = Set.copyOf(checkByRole.values());
+        Set<String> axSelectors = new HashSet<>();
         for (AxNode n : tree.nodes()) {
             if (n.ignored()) {
                 continue;
@@ -62,15 +65,19 @@ public final class AxNameRule extends InPageRule {
             }
             Target target = tree.target(n);
             check = refine(check, target);
-            if (check == null) {
+            if (check == null || !covered.contains(check)) {
                 continue;
             }
+            axSelectors.add(target.selector());
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("check", check);
             data.put("role", n.role());
             data.put("name", n.name());
             data.put("source", "accessibility-tree");
-            if (n.hasName()) {
+            if (uaNamedDateTimeWithoutAuthorName(target)) {
+                String msg = describe(n.role()) + " is a date/time control with no programmatically associated name; the browser-provided widget label does not satisfy the accessible-name requirement.";
+                out.add(finding(Outcome.FAILED, target, msg, data, url));
+            } else if (n.hasName()) {
                 String msg = describe(n.role()) + " is exposed with the accessible name \"" + abbreviate(n.name()) + "\".";
                 out.add(finding(Outcome.PASSED, target, msg, data, url));
             } else {
@@ -78,11 +85,10 @@ public final class AxNameRule extends InPageRule {
                 out.add(finding(Outcome.FAILED, target, msg, data, url));
             }
         }
-        // the tree is authoritative for the roles it covers; DOM findings for other checks are kept
-        Set<String> covered = Set.copyOf(checkByRole.values());
+        // the tree is authoritative for the roles it covers; keep DOM findings the tree never saw
         for (Finding f : domFindings) {
             Object check = f.evidence().data().get("check");
-            if (check == null || !covered.contains(check)) {
+            if (check == null || !covered.contains(check) || !axSelectors.contains(f.target().selector())) {
                 out.add(f);
             }
         }
@@ -105,13 +111,39 @@ public final class AxNameRule extends InPageRule {
             return "object-name";
         }
         if (html.startsWith("<input")) {
-            return html.contains("type=\"image\"") || html.contains("type='image'") ? "image-button-name" : check;
+            return html.contains("type=\"image\"") || html.contains("type='image'") ? "image-button-name" : "field-name";
         }
         if (html.startsWith("<iframe") || html.startsWith("<frame")) {
-            // a frame taken out of the tab order is not part of the sequential reading experience
-            return html.contains("tabindex=\"-1\"") ? null : "iframe-name";
+            if (html.contains("tabindex=\"-1\"") || html.contains("role=\"none\"") || html.contains("role='none'")
+                    || html.contains("role=\"presentation\"") || html.contains("role='presentation'")) {
+                return null;
+            }
+            return "iframe-name";
         }
         return check;
+    }
+
+    /**
+     * Chromium exposes a UA name for {@code type=date/time} widgets even when the author provided no
+     * label. ACT (and AccName) require a programmatic association, so those names do not count.
+     */
+    private static boolean uaNamedDateTimeWithoutAuthorName(Target target) {
+        String html = target.html() == null ? "" : target.html().toLowerCase(Locale.ROOT);
+        if (!html.startsWith("<input")) {
+            return false;
+        }
+        boolean dateLike = html.contains("type=\"date\"") || html.contains("type='date'")
+                || html.contains("type=\"time\"") || html.contains("type='time'")
+                || html.contains("type=\"week\"") || html.contains("type='week'")
+                || html.contains("type=\"month\"") || html.contains("type='month'")
+                || html.contains("type=\"datetime-local\"") || html.contains("type='datetime-local'");
+        if (!dateLike) {
+            return false;
+        }
+        if (html.contains("aria-label") || html.contains("aria-labelledby") || html.contains(" title=")) {
+            return false;
+        }
+        return !html.contains("id=");
     }
 
     private Finding finding(Outcome outcome, Target target, String message, Map<String, Object> data, String url) {

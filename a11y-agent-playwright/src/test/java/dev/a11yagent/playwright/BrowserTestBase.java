@@ -54,7 +54,7 @@ abstract class BrowserTestBase {
     }
 
     A11yConfig config() {
-        return A11yConfig.builder().artifactsDir(artifacts).build();
+        return A11yConfig.builder().artifactsDir(artifacts).recordVideo(false).build();
     }
 
     A11yAgent agent() {

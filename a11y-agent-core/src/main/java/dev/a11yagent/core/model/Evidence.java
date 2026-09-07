@@ -24,4 +24,9 @@ public record Evidence(String screenshot, String rationale, String model, double
     public Evidence withScreenshot(String path) {
         return new Evidence(path, rationale, model, confidence, data);
     }
+
+    /** True when a vision/language model produced this evidence. */
+    public boolean aiJudged() {
+        return model != null && !model.isBlank();
+    }
 }

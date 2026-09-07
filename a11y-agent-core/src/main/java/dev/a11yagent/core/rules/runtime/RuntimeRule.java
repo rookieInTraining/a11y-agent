@@ -47,6 +47,11 @@ public abstract class RuntimeRule implements Rule {
         return RuleKind.RUNTIME;
     }
 
+    @Override
+    public Impact impact() {
+        return impact;
+    }
+
     protected Finding finding(Outcome outcome, String selector, String html, Rect rect, String message, Map<String, Object> data, String url) {
         return Finding.builder(id)
                 .criteria(criteria)

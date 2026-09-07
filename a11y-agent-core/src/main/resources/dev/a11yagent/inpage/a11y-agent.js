@@ -89,13 +89,15 @@
   }
 
   function finding(outcome, el, message, data) {
+    data = data || {};
+    if (el && el.nodeType === 1 && !data.region) data.region = landmarkRegion(el);
     return {
       outcome: outcome,
       selector: el ? cssPath(el) : 'html',
       html: el ? snippet(el) : '',
       rect: el ? rect(el) : null,
       message: message,
-      data: data || {}
+      data: data
     };
   }
 
@@ -138,6 +140,26 @@
     if (ti !== null && parseInt(ti, 10) < 0) return false;
     if (el.closest('[inert]')) return false;
     return true;
+  }
+
+  /**
+   * Off-screen aria-hidden nodes used as focus-trap sentinels are in the tab order on purpose: a
+   * focus listener wraps keyboard users back into the dialog. Without that listener they are just
+   * hidden tab stops (ACT 6cfa84 failed example vs passed example).
+   */
+  function isFocusWrapSentinel(el) {
+    if (el.getAttribute('onfocus') || el.getAttribute('onfocusin')) return true;
+    var id = el.id;
+    if (!id) return false;
+    var hay = '';
+    for (var i = 0; i < document.scripts.length; i++) hay += document.scripts[i].textContent || '';
+    var from = 0;
+    while ((from = hay.indexOf(id, from)) >= 0) {
+      var around = hay.slice(Math.max(0, from - 48), from + id.length + 96);
+      if (/addEventListener\s*\(\s*['"]focus/i.test(around) || /\.onfocus\s*=/.test(around)) return true;
+      from += id.length;
+    }
+    return false;
   }
 
   function tabbables() {
@@ -189,6 +211,52 @@
     return norm(texts.join(' '));
   }
 
+  /** Programmatic label for WCAG 3.3.2: label association or aria-* only (not placeholder/title/name). */
+  function programmaticLabel(el) {
+    var lt = labelText(el);
+    if (lt) return { kind: 'label', text: lt };
+    var al = el.getAttribute('aria-label');
+    if (al && norm(al)) return { kind: 'aria-label', text: norm(al) };
+    var lb = el.getAttribute('aria-labelledby');
+    if (lb) {
+      var parts = lb.split(/\s+/).map(function (id) {
+        var ref = document.getElementById(id);
+        return ref ? norm(textFromSubtree(ref, 0)) : '';
+      });
+      var joined = norm(parts.join(' '));
+      if (joined) return { kind: 'aria-labelledby', text: joined };
+    }
+    return null;
+  }
+
+  function landmarkRegion(el) {
+    if (!el || el.nodeType !== 1) return 'other';
+    var n = el;
+    while (n && n.nodeType === 1) {
+      var role = typeof explicitRole === 'function' ? explicitRole(n) : lower(n.getAttribute('role'));
+      if (!role) {
+        if (n.nodeName === 'MAIN') role = 'main';
+        else if (n.nodeName === 'NAV') role = 'navigation';
+        else if (n.nodeName === 'HEADER') role = 'banner';
+        else if (n.nodeName === 'FOOTER') role = 'contentinfo';
+      }
+      if (role === 'main') return 'main';
+      if (role === 'navigation') return 'nav';
+      if (role === 'banner') return 'banner';
+      if (role === 'contentinfo') return 'contentinfo';
+      n = n.parentElement;
+    }
+    return 'other';
+  }
+
+  function inScope(el, scopeSelector) {
+    if (!scopeSelector || !el) return true;
+    try {
+      var root = document.querySelector(scopeSelector);
+      return root ? root.contains(el) : true;
+    } catch (e) { return true; }
+  }
+
   /* Simplified accessible name computation (accname 1.2 without the full recursion rules). */
   function accessibleName(el) {
     if (!el) return '';
@@ -206,7 +274,7 @@
     var tag = el.nodeName;
     if (tag === 'IMG' || tag === 'AREA') return norm(el.getAttribute('alt') || el.getAttribute('title') || '');
     if (tag === 'INPUT' && (el.type === 'button' || el.type === 'submit' || el.type === 'reset')) return norm(el.value || (el.type === 'submit' ? 'Submit' : el.type === 'reset' ? 'Reset' : ''));
-    if (tag === 'INPUT' && el.type === 'image') return norm(el.getAttribute('alt') || el.value || '');
+    if (tag === 'INPUT' && el.type === 'image') return norm(el.getAttribute('alt') || el.value || el.getAttribute('title') || '');
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {
       var lt = labelText(el);
       if (lt) return lt;
@@ -236,9 +304,17 @@
   }
 
   function parseColor(c) {
-    var m = (c || '').match(/rgba?\(([^)]+)\)/);
+    var s = String(c || '').trim();
+    var hexm = /^#([0-9a-f]{3,8})$/i.exec(s);
+    if (hexm) {
+      var h = hexm[1];
+      if (h.length === 3 || h.length === 4) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+      if (h.length >= 6) return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16), a: 1 };
+    }
+    var m = s.match(/rgba?\(([^)]+)\)/);
     if (!m) return null;
-    var p = m[1].split(',').map(function (v) { return parseFloat(v); });
+    var p = m[1].split(/[\s,/]+/).map(function (v) { return parseFloat(v); }).filter(function (n) { return !isNaN(n); });
+    if (p.length < 3) return null;
     return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
   }
 
@@ -248,19 +324,31 @@
     return ca.r === cb.r && ca.g === cb.g && ca.b === cb.b && Math.abs(ca.a - cb.a) < 0.01;
   }
 
+  function shadowOwnText(el) {
+    if (!el.shadowRoot) return '';
+    var t = '';
+    for (var c = el.shadowRoot.firstChild; c; c = c.nextSibling) {
+      if (c.nodeType === 3) t += c.nodeValue;
+    }
+    return t;
+  }
+
   function hasOwnText(el) {
-    return Array.prototype.some.call(el.childNodes, function (n) { return n.nodeType === 3 && norm(n.nodeValue).length > 0; });
+    if (Array.prototype.some.call(el.childNodes, function (n) { return n.nodeType === 3 && norm(n.nodeValue).length > 0; })) return true;
+    return !!norm(shadowOwnText(el));
   }
 
   function ownTextLength(el) {
     var len = 0;
     el.childNodes.forEach(function (n) { if (n.nodeType === 3) len += norm(n.nodeValue).length; });
+    len += shadowOwnText(el).length;
     return len;
   }
 
   function ownText(el) {
     var t = '';
     el.childNodes.forEach(function (n) { if (n.nodeType === 3) t += n.nodeValue; });
+    t += shadowOwnText(el);
     return norm(t);
   }
 
@@ -580,6 +668,27 @@
     return false;
   }
 
+  /** Hyphenation and abbreviations (Ave/Avenue) are not label-in-name failures. Concatenation of unrelated words is. */
+  function labelMatchesLoosely(name, visible, nameWords, visibleWords) {
+    if (/-/.test(name) || /-/.test(visible)) {
+      var n = nameWords.join('');
+      var v = visibleWords.join('');
+      if (n === v || n.indexOf(v) >= 0 || v.indexOf(n) >= 0) return true;
+    }
+    if (visibleWords.length === nameWords.length) {
+      var i, ok = true;
+      for (i = 0; i < visibleWords.length; i++) {
+        if (nameWords[i] === visibleWords[i]) continue;
+        if (visibleWords[i].length >= 3 && nameWords[i].indexOf(visibleWords[i]) === 0) continue;
+        if (nameWords[i].length >= 3 && visibleWords[i].indexOf(nameWords[i]) === 0) continue;
+        ok = false;
+        break;
+      }
+      if (ok) return true;
+    }
+    return false;
+  }
+
   /* Inner text as a sighted user reads it: visually hidden helper text is excluded. */
   function visibleInnerText(el, depth) {
     var out = '';
@@ -592,7 +701,7 @@
       var r = n.getBoundingClientRect();
       var clipped = (cs.clipPath && cs.clipPath !== 'none' && /inset\(\s*50%/.test(cs.clipPath)) || (r.width <= 1 && r.height <= 1);
       if (clipped) continue;
-      out += ' ' + ((depth || 0) < 6 ? visibleInnerText(n, (depth || 0) + 1) : norm(n.textContent)) + ' ';
+      out += ((depth || 0) < 6 ? visibleInnerText(n, (depth || 0) + 1) : (n.textContent || ''));
     }
     return out;
   }
@@ -617,14 +726,15 @@
       var visibleWords = labelWords(visible);
       var nameWords = labelWords(name);
       if (!visibleWords.length) return;
-      // a lone capital letter is usually an abbreviation or an icon stand-in, which ACT excludes
-      var singleCapital = norm(visible.replace(/\([^)]*\)/g, ' ')).split(/\s+/).some(function (w) { return /^\p{Lu}$/u.test(w); });
-      if (singleCapital) {
-        out.push(fc('cantTell', el, 'label-in-name', 'The visible text "' + visible + '" contains a single-letter token, which may be an abbreviation or icon; ACT excludes abbreviations from this rule, so confirm manually against the accessible name "' + name + '".', data));
+      // a lone letter is usually an icon; a lone digit is still a visible label
+      if (visibleWords.length === 1 && visibleWords[0].length === 1 && !/^[0-9]$/.test(visibleWords[0])) {
+        out.push(fc('cantTell', el, 'label-in-name', 'The visible text "' + visible + '" is a single character, which may be an abbreviation or icon; ACT excludes those from this rule.', data));
         return;
       }
       if (containsWordSequence(nameWords, visibleWords)) {
         out.push(fc('passed', el, 'label-in-name', 'Accessible name contains the visible label.', data));
+      } else if (labelMatchesLoosely(name, visible, nameWords, visibleWords)) {
+        out.push(fc('inapplicable', el, 'label-in-name', 'Visible text "' + visible + '" and accessible name "' + name + '" differ by abbreviation, hyphenation or expansion, which this rule does not judge.', data));
       } else {
         out.push(fc('failed', el, 'label-in-name', 'Accessible name "' + name + '" does not contain the visible label "' + visible + '". Speech-input users cannot activate it by saying what they see.', data));
       }
@@ -669,27 +779,57 @@
 
   rules['timing-adjustable'] = function () {
     var out = [];
-    var first = true;
-    document.querySelectorAll('meta[http-equiv]').forEach(function (m) {
-      if (lower(m.getAttribute('http-equiv')) !== 'refresh') return;
-      var content = norm(m.getAttribute('content') || '');
-      // only the first syntactically valid refresh directive in the document has any effect
-      if (!/^\d+\s*(;.*)?$/.test(content)) return;
-      if (!first) return;
-      first = false;
-      var secs = parseInt(content, 10);
-      var data = { content: content, seconds: secs };
-      if (secs === 0) {
-        out.push(fc('passed', m, 'meta-refresh', 'Immediate client-side redirect (delay 0) is exempt from the time-limit requirement.', data));
-        out.push(fc('failed', m, 'meta-refresh-strict', 'Page redirects automatically via meta refresh; at AAA (2.2.3 No Timing) no timing is allowed, including a zero delay.', data));
-      } else if (secs > 72000) {
-        out.push(fc('passed', m, 'meta-refresh', 'Refresh delay of ' + secs + 's exceeds 20 hours and is exempt.', data));
-        out.push(fc('failed', m, 'meta-refresh-strict', 'Page refreshes automatically after ' + secs + 's; at AAA no timing is allowed.', data));
-      } else {
-        out.push(fc('failed', m, 'meta-refresh', 'Page refreshes or redirects automatically after ' + secs + 's with no way to turn off, adjust or extend the time limit (F40/F41).', data));
-        out.push(fc('failed', m, 'meta-refresh-strict', 'Page refreshes automatically after ' + secs + 's; at AAA no timing is allowed.', data));
+    var contents = [];
+    var pack = document.getElementById('a11y-agent-meta-refresh');
+    if (pack && pack.textContent) {
+      try {
+        var arr = JSON.parse(pack.textContent);
+        if (arr && arr.length) arr.forEach(function (c) { if (norm(c)) contents.push(c); });
+      } catch (e) { /* ignore malformed payload */ }
+    }
+    var stamped = document.documentElement.getAttribute('data-a11y-meta-refresh');
+    if (!contents.length && stamped) stamped.split(/\n/).forEach(function (c) { if (norm(c)) contents.push(c); });
+    if (!contents.length) {
+      Array.prototype.forEach.call(document.getElementsByTagName('meta'), function (m) {
+        var equiv = lower((m.httpEquiv || '') + ' ' + (m.getAttribute('http-equiv') || ''));
+        if (equiv.indexOf('refresh') < 0) return;
+        var c = String(m.content || m.getAttribute('content') || '');
+        if (norm(c)) contents.push(c);
+      });
+    }
+    if (!contents.length) {
+      var html = document.documentElement ? document.documentElement.innerHTML : '';
+      var re = /<meta\b[^>]*>/gi;
+      var tag;
+      while ((tag = re.exec(html))) {
+        if (!/http-equiv\s*=\s*['"]?(?:x-a11y-)?refresh['"]?/i.test(tag[0])) continue;
+        var cm = /content\s*=\s*["']([^"']*)["']/i.exec(tag[0]) || /content\s*=\s*([^\s>]+)/i.exec(tag[0]);
+        if (cm) contents.push(cm[1]);
       }
-    });
+    }
+    var i;
+    for (i = 0; i < contents.length; i++) {
+      var content = norm(contents[i]);
+      // HTML refresh is an integer delay, optionally followed by ";" and a URL.
+      // "0: https://..." is not valid, so later (valid) metas still apply.
+      var parsed = /^(\d+)\s*(?:;|$)/.exec(content);
+      if (!parsed) continue;
+      var secs = parseInt(parsed[1], 10);
+      var el = document.documentElement;
+      // bc659a: delay 0 and >20h are exempt. bisz58: only delay 0 (instant redirect) is exempt.
+      // each finding needs its own data object; fc() writes `check` onto the object it is given
+      if (secs === 0) {
+        out.push(fc('passed', el, 'meta-refresh', 'Immediate client-side redirect (delay 0) is exempt from the time-limit requirement.', { content: content, seconds: secs }));
+        out.push(fc('passed', el, 'meta-refresh-strict', 'Immediate client-side redirect (delay 0) is a change of context, not a delayed refresh.', { content: content, seconds: secs }));
+      } else if (secs > 72000) {
+        out.push(fc('passed', el, 'meta-refresh', 'Refresh delay of ' + secs + 's exceeds 20 hours and is exempt.', { content: content, seconds: secs }));
+        out.push(fc('failed', el, 'meta-refresh-strict', 'Page refreshes automatically after ' + secs + 's; 2.2.4/3.2.5 have no 20-hour exception.', { content: content, seconds: secs }));
+      } else {
+        out.push(fc('failed', el, 'meta-refresh', 'Page refreshes or redirects automatically after ' + secs + 's with no way to turn off, adjust or extend the time limit (F40/F41).', { content: content, seconds: secs }));
+        out.push(fc('failed', el, 'meta-refresh-strict', 'Page refreshes automatically after ' + secs + 's; at AAA no delayed refresh is allowed.', { content: content, seconds: secs }));
+      }
+      break;
+    }
     return out;
   };
 
@@ -830,13 +970,32 @@
     return out;
   };
 
+  function angleIsVisibleRotation(v, unit) {
+    var deg = unit === 'turn' ? v * 360 : unit === 'rad' ? v * 180 / Math.PI : unit === 'grad' ? v * 0.9 : v;
+    return Math.abs(deg % 360) > 0.5;
+  }
+
   /* A rotation that is a whole number of turns leaves the content the right way up. */
   function rotatesVisibly(transform) {
-    var m = /rotate(?:[XYZ]|3d\([^)]*\))?\(\s*(-?[\d.]+)(deg|grad|rad|turn)\s*\)/i.exec(transform || '');
-    if (!m) return false;
-    var v = parseFloat(m[1]);
-    var deg = m[2] === 'turn' ? v * 360 : m[2] === 'rad' ? v * 180 / Math.PI : m[2] === 'grad' ? v * 0.9 : v;
-    return Math.abs(deg % 360) > 0.5;
+    var t = transform || '';
+    var m = /rotate(?:[XYZ]|3d\([^)]*\))?\(\s*(-?[\d.]+)(deg|grad|rad|turn)\s*\)/i.exec(t);
+    if (m) return angleIsVisibleRotation(parseFloat(m[1]), m[2]);
+    // CSS rotate property as a computed/specified value ("90deg") or in a declaration ("rotate: 90deg")
+    var prop = /(?:^|[;\s{])rotate\s*:\s*(-?[\d.]+)(deg|grad|rad|turn)/i.exec(t);
+    if (prop) return angleIsVisibleRotation(parseFloat(prop[1]), prop[2]);
+    var simple = /^\s*(-?[\d.]+)(deg|grad|rad|turn)\s*$/i.exec(t);
+    if (simple) return angleIsVisibleRotation(parseFloat(simple[1]), simple[2]);
+    // matrix3d used as a 90° rotation (swap x/y, negate one axis). Parse only the arguments so the
+    // trailing "3" in "matrix3d" is not treated as the first number.
+    var mi = t.toLowerCase().indexOf('matrix3d(');
+    if (mi >= 0) {
+      var nums = t.slice(mi + 9).match(/-?[\d.]+/g);
+      if (nums && nums.length >= 6) {
+        var a = parseFloat(nums[0]), b = parseFloat(nums[1]), c = parseFloat(nums[4]), d = parseFloat(nums[5]);
+        if (Math.abs(a) < 0.01 && Math.abs(d) < 0.01 && Math.abs(Math.abs(b) - 1) < 0.01 && Math.abs(Math.abs(c) - 1) < 0.01) return true;
+      }
+    }
+    return false;
   }
 
   rules['orientation'] = function () {
@@ -858,7 +1017,10 @@
           var sel = lower(inner.selectorText);
           var isRoot = /^(html|body|#root|#app|main|\.app|\.page|\*)(\s*,|$)/.test(sel) || /\bbody\b|\bhtml\b/.test(sel);
           if (isRoot && (inner.style.display === 'none' || inner.style.visibility === 'hidden')) hides = true;
-          if (rotatesVisibly(inner.style.transform || '')) rotates = true;
+          var cssText = (inner.cssText || '') + ' ' + (inner.style && inner.style.cssText || '');
+          if (rotatesVisibly(inner.style.transform || '') || rotatesVisibly(inner.style.getPropertyValue('transform') || '')
+                  || rotatesVisibly(inner.style.rotate || '') || rotatesVisibly(inner.style.getPropertyValue('rotate') || '')
+                  || rotatesVisibly(cssText)) rotates = true;
         }
         var data = { media: r.media.mediaText, sheet: sheets[i].href || 'inline' };
         if (hides) out.push(finding('failed', null, 'Stylesheet hides the page in one orientation (' + r.media.mediaText + '). Content must not be restricted to a single display orientation unless essential.', data));
@@ -901,17 +1063,27 @@
     return out;
   };
 
-  rules['content-on-hover-title'] = function () {
+  rules['content-on-hover-title'] = function (options) {
+    var scope = options && options.scopeSelector;
+    var cookieRe = /\b(cookie|consent|gdpr|privacy banner|accept all|reject all)\b/i;
     var out = [];
     document.querySelectorAll('[title]').forEach(function (el) {
-      if (!isVisible(el)) return;
+      if (!isVisible(el) || !inScope(el, scope)) return;
       var title = norm(el.getAttribute('title'));
       if (!title) return;
       if (el.nodeName === 'IFRAME' || el.nodeName === 'ABBR' || el.nodeName === 'SVG' || el.nodeName === 'svg') return;
+      if (scope === 'main' && cookieRe.test(title + ' ' + lower(accessibleName(el)))) return;
       var vt = lower(visibleText(el));
       var name = lower(accessibleName(el));
-      if (vt === lower(title) || name === lower(title)) return; // purely redundant title
+      if (vt === lower(title) || name === lower(title)) return;
       out.push(finding('needsReview', el, 'Additional content is exposed only via a native title tooltip ("' + title + '"). Native tooltips are not dismissible, hoverable or keyboard-triggerable, and are unavailable to touch users.', { title: title }));
+    });
+    out.sort(function (a, b) {
+      var ra = (a.data && a.data.region) || 'other';
+      var rb = (b.data && b.data.region) || 'other';
+      if (ra === 'main' && rb !== 'main') return -1;
+      if (rb === 'main' && ra !== 'main') return 1;
+      return 0;
     });
     return out;
   };
@@ -926,7 +1098,7 @@
   var ID_ATTRS_STRICT = { 'aria-labelledby': 1, 'aria-describedby': 1, 'aria-activedescendant': 1, 'aria-errormessage': 1, 'aria-details': 1, 'aria-flowto': 1 };
   var ID_ATTRS_SINGLE = { 'aria-activedescendant': 1, 'aria-errormessage': 1, 'aria-details': 1 };
   var GLOBAL_ARIA = ['aria-atomic', 'aria-braillelabel', 'aria-brailleroledescription', 'aria-busy', 'aria-controls', 'aria-current', 'aria-describedby', 'aria-description', 'aria-details', 'aria-dropeffect', 'aria-flowto', 'aria-grabbed', 'aria-hidden', 'aria-keyshortcuts', 'aria-label', 'aria-labelledby', 'aria-live', 'aria-owns', 'aria-relevant', 'aria-roledescription'];
-  var REQUIRED_ATTRS = { checkbox: ['aria-checked'], menuitemcheckbox: ['aria-checked'], switch: ['aria-checked'], radio: ['aria-checked'], menuitemradio: ['aria-checked'], combobox: ['aria-expanded'], heading: ['aria-level'], meter: ['aria-valuenow'], scrollbar: ['aria-controls', 'aria-valuenow'], slider: ['aria-valuenow'], separator: ['aria-valuenow'], option: ['aria-selected'] };
+  var REQUIRED_ATTRS = { checkbox: ['aria-checked'], menuitemcheckbox: ['aria-checked'], switch: ['aria-checked'], radio: ['aria-checked'], menuitemradio: ['aria-checked'], combobox: ['aria-expanded'], heading: ['aria-level'], meter: ['aria-valuenow'], scrollbar: ['aria-controls', 'aria-valuenow'], slider: ['aria-valuenow'], separator: ['aria-valuenow'] };
   var REQUIRED_CONTEXT = { listitem: ['list', 'directory'], option: ['listbox', 'group'], tab: ['tablist'], menuitem: ['menu', 'menubar', 'group'], menuitemcheckbox: ['menu', 'menubar', 'group'], menuitemradio: ['menu', 'menubar', 'group'], row: ['table', 'grid', 'treegrid', 'rowgroup'], rowgroup: ['table', 'grid', 'treegrid'], cell: ['row'], gridcell: ['row'], columnheader: ['row'], rowheader: ['row'], treeitem: ['tree', 'group'] };
   var IMPLICIT_ROLES = { UL: 'list', OL: 'list', MENU: 'list', LI: 'listitem', TABLE: 'table', TBODY: 'rowgroup', THEAD: 'rowgroup', TFOOT: 'rowgroup', TR: 'row', TD: 'cell', TH: 'columnheader', SELECT: 'listbox', DATALIST: 'listbox', OPTION: 'option', NAV: 'navigation', MAIN: 'main', HEADER: 'banner', FOOTER: 'contentinfo', ASIDE: 'complementary', FORM: 'form', BUTTON: 'button', A: 'link', IMG: 'img', H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', H5: 'heading', H6: 'heading', DIALOG: 'dialog', ARTICLE: 'article', SECTION: 'region', TEXTAREA: 'textbox', PROGRESS: 'progressbar', METER: 'meter', HR: 'separator', AUDIO: 'audio', VIDEO: 'video', SUMMARY: 'button', DETAILS: 'group' };
   var BOOLEAN_ATTRS = { 'aria-hidden': ['true', 'false'], 'aria-required': ['true', 'false'], 'aria-disabled': ['true', 'false'], 'aria-readonly': ['true', 'false'], 'aria-multiline': ['true', 'false'], 'aria-multiselectable': ['true', 'false'], 'aria-modal': ['true', 'false'], 'aria-atomic': ['true', 'false'], 'aria-busy': ['true', 'false'], 'aria-expanded': ['true', 'false', 'undefined'], 'aria-pressed': ['true', 'false', 'mixed', 'undefined'], 'aria-checked': ['true', 'false', 'mixed', 'undefined'], 'aria-selected': ['true', 'false', 'undefined'], 'aria-live': ['off', 'polite', 'assertive'], 'aria-haspopup': ['true', 'false', 'menu', 'listbox', 'tree', 'grid', 'dialog'], 'aria-orientation': ['horizontal', 'vertical', 'undefined'], 'aria-sort': ['none', 'ascending', 'descending', 'other'], 'aria-autocomplete': ['none', 'inline', 'list', 'both'], 'aria-invalid': ['true', 'false', 'grammar', 'spelling'], 'aria-current': ['page', 'step', 'location', 'date', 'time', 'true', 'false'] };
@@ -1066,7 +1238,7 @@
     while (node && node.nodeType === 1) {
       var cs = style(node);
       if (!cs) break;
-      if (cs.backgroundImage && cs.backgroundImage !== 'none') return { unknown: 'background-image on ' + node.nodeName.toLowerCase() };
+      if (cs.backgroundImage && cs.backgroundImage !== 'none') return { unknown: 'background-image on ' + node.nodeName.toLowerCase(), image: cs.backgroundImage, color: parseColor(cs.backgroundColor) };
       if (parseFloat(cs.opacity) < 1 && node !== el) return { unknown: 'opacity on ancestor' };
       if (cs.filter && cs.filter !== 'none' || cs.mixBlendMode && cs.mixBlendMode !== 'normal') return { unknown: 'filter/blend-mode' };
       var bg = parseColor(cs.backgroundColor);
@@ -1081,16 +1253,83 @@
     return { color: result };
   }
 
+  function gradientStopColors(bgImage) {
+    if (!bgImage) return [];
+    var out = [];
+    var re = /#([0-9a-f]{3,8})\b|rgba?\(\s*([\d.]+)[\s,/]+([\d.]+)[\s,/]+([\d.]+)/ig;
+    var m;
+    while ((m = re.exec(bgImage))) {
+      if (m[1]) {
+        var hex = m[1];
+        var parsed = parseColor('#' + hex);
+        if (!parsed) {
+          // parseColor only understands rgb(); expand hex locally
+          if (hex.length === 3) hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+          parsed = { r: parseInt(hex.slice(0, 2), 16), g: parseInt(hex.slice(2, 4), 16), b: parseInt(hex.slice(4, 6), 16), a: 1 };
+        }
+        if (parsed) out.push(parsed);
+      } else {
+        out.push({ r: Number(m[2]), g: Number(m[3]), b: Number(m[4]), a: 1 });
+      }
+    }
+    if (/transparent/i.test(bgImage)) out.push({ r: 255, g: 255, b: 255, a: 1 });
+    return out;
+  }
+
+  /**
+   * Worst contrast ratio against parseable gradient stops, solid fallbacks and text-shadow colours.
+   * Returns null when the background still cannot be judged (e.g. a photographic url() that passed
+   * against the solid fallback colour).
+   */
+  function sampleUnmeasurableBackground(el, cs, fg, required) {
+    var candidates = [];
+    candidates = candidates.concat(gradientStopColors(cs.backgroundImage));
+    var solid = parseColor(cs.backgroundColor);
+    if (solid && solid.a >= 1) candidates.push(solid);
+    var node = el.parentElement;
+    while (node && candidates.length === 0) {
+      var pcs = style(node);
+      if (pcs) {
+        candidates = candidates.concat(gradientStopColors(pcs.backgroundImage));
+        var psolid = parseColor(pcs.backgroundColor);
+        if (psolid && psolid.a >= 1) candidates.push(psolid);
+      }
+      node = node.parentElement;
+    }
+    if (!candidates.length) return null;
+    var i, worst = Infinity, worstBg = candidates[0], anyPass = false, anyFail = false;
+    for (i = 0; i < candidates.length; i++) {
+      var ratio = contrastRatio(fg, candidates[i]);
+      if (ratio < worst) { worst = ratio; worstBg = candidates[i]; }
+      if (ratio + 0.005 < required) anyFail = true;
+      else anyPass = true;
+    }
+    if (anyFail && anyPass) return null;
+    if (anyFail) return { fail: true, ratio: worst, background: worstBg };
+    if (cs.backgroundImage && /url\s*\(/i.test(cs.backgroundImage) && !/gradient\(/i.test(cs.backgroundImage)) return null;
+    return { fail: false, ratio: worst, background: worstBg };
+  }
+
   function firstTextPoint(el) {
-    for (var i = 0; i < el.childNodes.length; i++) {
-      var n = el.childNodes[i];
-      if (n.nodeType !== 3 || !norm(n.nodeValue)) continue;
+    function fromNode(n) {
+      if (n.nodeType !== 3 || !norm(n.nodeValue)) return null;
       var range = document.createRange();
       range.selectNodeContents(n);
       var rects = range.getClientRects();
       if (rects.length) {
         var r = rects[0];
         return { x: r.left + Math.min(r.width / 2, 4), y: r.top + r.height / 2, height: r.height };
+      }
+      return null;
+    }
+    for (var i = 0; i < el.childNodes.length; i++) {
+      var hit = fromNode(el.childNodes[i]);
+      if (hit) return hit;
+    }
+    if (el.shadowRoot) {
+      for (var c = el.shadowRoot.firstChild; c; c = c.nextSibling) {
+        var sh = fromNode(c);
+        if (sh) return sh;
       }
     }
     return null;
@@ -1146,14 +1385,20 @@
       for (var i = 0; i < all.length; i++) {
         var el = all[i];
         if (hasOwnText(el)) out.push(el);
-        if (el.shadowRoot) walk(el.shadowRoot, depth + 1);
+        if (el.shadowRoot) {
+          walk(el.shadowRoot, depth + 1);
+          for (var c = el.shadowRoot.firstChild; c; c = c.nextSibling) {
+            if (c.nodeType === 3 && norm(c.nodeValue)) out.push(el);
+          }
+        }
       }
     }
     walk(document.body || document, 0);
     return out;
   }
 
-  function colorContrast(levelAAA) {
+  function colorContrast(levelAAA, options) {
+    var scope = options && options.scopeSelector;
     var out = [];
     var all = textBearingElements();
     var checked = 0;
@@ -1161,11 +1406,14 @@
     var seenKeys = {};
     for (var i = 0; i < all.length; i++) {
       var el = all[i];
+      if (!inScope(el, scope)) continue;
       if (el.nodeName === 'SCRIPT' || el.nodeName === 'STYLE' || el.nodeName === 'NOSCRIPT' || el.nodeName === 'OPTION' || el.nodeName === 'TITLE') continue;
       if (!isOnScreen(el) || !inAccessibilityTree(el)) continue;
       if (el.closest('[disabled], [aria-disabled="true"], option, select')) continue;
       if (labelsDisabledControl(el)) continue;
       if (isDecorativeText(ownText(el))) continue;
+      var own = ownText(el);
+      if (own.length === 1 && el.getAttribute('aria-label') && norm(own) !== norm(el.getAttribute('aria-label'))) continue;
       var cs = style(el);
       if (!cs) continue;
       var fg = parseColor(cs.color);
@@ -1177,7 +1425,21 @@
       var large = fontSize >= 24 || (fontSize >= 18.66 && weight >= 700);
       var required = levelAAA ? (large ? 4.5 : 7) : (large ? 3 : 4.5);
       var reason = null;
-      if (cs.textShadow && cs.textShadow !== 'none') reason = 'text-shadow';
+      if (cs.textShadow && cs.textShadow !== 'none') {
+        var shadows = gradientStopColors(cs.textShadow);
+        var helpfulHalo = false, harmfulHalo = false;
+        for (var si = 0; si < shadows.length; si++) {
+          var sr = contrastRatio(fg, shadows[si]);
+          if (sr >= required) helpfulHalo = true;
+          else if (sr < 3) harmfulHalo = true;
+        }
+        if (helpfulHalo) { checked++; continue; }
+        if (harmfulHalo) {
+          out.push(fc('failed', el, 'contrast', 'Text contrast against its text-shadow is below the ' + required + ':1 ' + (levelAAA ? 'AAA' : 'AA') + ' minimum (' + hex(fg) + ').', { required: required, foreground: hex(fg), background: 'text-shadow', fontSize: Math.round(fontSize * 10) / 10, text: visibleText(el).slice(0, 80) }));
+          checked++;
+          continue;
+        }
+      }
       var bgInfo = effectiveBackground(el);
       if (!reason && bgInfo.unknown) reason = bgInfo.unknown;
       var pt = firstTextPoint(el);
@@ -1186,7 +1448,14 @@
         if (top && top !== el && !el.contains(top) && !top.contains(el)) reason = 'content painted over the text';
       }
       if (reason) {
-        // hand the element to the screenshot sampler instead of guessing
+        var sampled = sampleUnmeasurableBackground(el, cs, fg, required);
+        if (sampled && sampled.fail) {
+          var dataU = { ratio: Math.round(sampled.ratio * 100) / 100, required: required, foreground: hex(fg), background: hex(sampled.background) || reason, fontSize: Math.round(fontSize * 10) / 10, text: visibleText(el).slice(0, 80) };
+          out.push(fc('failed', el, 'contrast', 'Text contrast ' + dataU.ratio + ':1 against a ' + reason + ' is below the ' + required + ':1 ' + (levelAAA ? 'AAA' : 'AA') + ' minimum (' + hex(fg) + ').', dataU));
+          checked++;
+          continue;
+        }
+        if (sampled && !sampled.fail) { checked++; continue; }
         unmeasurable.push({ selector: cssPath(el), html: snippet(el), rect: pt ? { x: pt.x, y: pt.y, width: 1, height: pt.height } : rect(el),
           reason: reason, foreground: hex(fg), fontSize: Math.round(fontSize * 10) / 10, largeText: large, required: required, opacity: cumulativeOpacity(el) });
         continue;
@@ -1210,17 +1479,35 @@
     if (out.length === 0 && checked > 0) out.push(fc('passed', null, 'contrast', checked + ' text element(s) meet the ' + (levelAAA ? 'AAA' : 'AA') + ' contrast minimum.', { checked: checked }));
     // reported separately so the driver can measure these from a screenshot
     if (unmeasurable.length) out.push(fc('cantTell', null, 'contrast-unmeasurable', unmeasurable.length + ' text element(s) need pixel sampling (' + unmeasurable[0].reason + ').', { targets: unmeasurable, levelAAA: !!levelAAA }));
+    document.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]), textarea').forEach(function (input) {
+      if (!isVisible(input) || !inScope(input, scope)) return;
+      var ph = style(input, '::placeholder');
+      if (!ph) return;
+      var phColor = parseColor(ph.color);
+      if (!phColor || phColor.a === 0) return;
+      var bgInfo = effectiveBackground(input);
+      if (!bgInfo || !bgInfo.color) return;
+      var fontSize = parseFloat((style(input) || {}).fontSize) || 16;
+      var weight = parseInt((style(input) || {}).fontWeight, 10) || 400;
+      var large = fontSize >= 24 || (fontSize >= 18.66 && weight >= 700);
+      var required = levelAAA ? (large ? 4.5 : 7) : (large ? 3 : 4.5);
+      var ratio = contrastRatio(phColor, bgInfo.color);
+      var pdata = { ratio: Math.round(ratio * 100) / 100, required: required, foreground: hex(phColor), background: hex(bgInfo.color), placeholder: input.getAttribute('placeholder'), check: 'placeholder-contrast' };
+      if (ratio + 0.005 < required) {
+        out.push(fc('failed', input, 'placeholder-contrast', 'Placeholder text contrast ' + pdata.ratio + ':1 is below the ' + required + ':1 ' + (levelAAA ? 'AAA' : 'AA') + ' minimum (' + pdata.foreground + ' on ' + pdata.background + ').', pdata));
+      }
+    });
     return out;
   }
 
-  rules['color-contrast'] = function () { return colorContrast(false); };
-  rules['color-contrast-enhanced'] = function () { return colorContrast(true); };
+  rules['color-contrast'] = function (options) { return colorContrast(false, options); };
+  rules['color-contrast-enhanced'] = function (options) { return colorContrast(true, options); };
 
   /* --- text alternatives and names --------------------------------------- */
 
   /* Findings carry a `check` sub-identifier so a rule can cover several ACT rules while staying addressable. */
   function fc(outcome, el, check, message, data) {
-    data = data || {};
+    data = Object.assign({}, data || {});
     data.check = check;
     return finding(outcome, el, message, data);
   }
@@ -1259,7 +1546,14 @@
         return;
       }
       if (tag === 'OBJECT') {
-        // an object takes its name only from the author; its fallback content is not a name
+        var dataSrc = el.getAttribute('data') || '';
+        var mime = el.getAttribute('type') || '';
+        var isImage = /^image\//i.test(mime) || /\.(png|jpe?g|gif|svg|webp|bmp)(\?|#|$)/i.test(dataSrc);
+        var loaded = false;
+        try { loaded = !!(el.contentDocument || el.getSVGDocument && el.getSVGDocument()); } catch (e) { loaded = false; }
+        // fallback HTML is not a name; an object that never rendered HTML/plugin content is out of scope
+        // unless it is an image, which never exposes a contentDocument
+        if (!isImage && !loaded && el.querySelector('img, a, p, span, svg')) return;
         var objName = norm(el.getAttribute('aria-label') || '');
         var lb = el.getAttribute('aria-labelledby');
         if (!objName && lb) {
@@ -1298,6 +1592,8 @@
       var visible = isVisible(el);
       var tabbable = isTabbable(el);
       if (el.nodeName === 'IFRAME') {
+        var irole = explicitRole(el);
+        if (irole === 'none' || irole === 'presentation' || el.getAttribute('tabindex') === '-1') return;
         if (!inAccessibilityTree(el)) return;
         var t = norm(accessibleName(el));
         if (!t) out.push(fc('failed', el, 'iframe-name', '<iframe> has no accessible name; screen reader users cannot tell what the frame contains. Add a title attribute.', { src: (el.getAttribute('src') || '').slice(0, 200) }));
@@ -1308,7 +1604,11 @@
       var name = norm(accessibleName(el));
       var role = computedRole(el) || el.nodeName.toLowerCase();
       if (el.nodeName === 'SUMMARY' && !(el.parentElement && el.parentElement.nodeName === 'DETAILS')) return;
+      if (el.nodeName === 'SUMMARY' && el.parentElement.querySelector('summary') !== el) return;
+      if (role === 'presentation' || role === 'none') return;
       var check = el.nodeName === 'SUMMARY' ? 'summary-name'
+              : el.nodeName === 'A' || role === 'link' || role === 'doc-biblioref' ? 'link-name'
+              : (el.nodeName === 'INPUT' || el.nodeName === 'SELECT' || el.nodeName === 'TEXTAREA') ? 'field-name'
               : NAME_CHECK_BY_ROLE[role] ? NAME_CHECK_BY_ROLE[role]
               : FIELD_ROLES.indexOf(role) >= 0 ? 'field-name'
               : 'other-name';
@@ -1322,6 +1622,31 @@
       var what = el.nodeName === 'A' || role === 'link' ? 'Link' : role === 'button' ? 'Button' : FIELD_ROLES.indexOf(role) >= 0 ? 'Form field' : 'Control (role=' + role + ')';
       var hint = role === 'link' || role === 'button' ? 'Add visible text, an aria-label, or alt text on the contained image.' : FIELD_ROLES.indexOf(role) >= 0 ? 'Associate a <label for>, wrap it in a <label>, or use aria-label/aria-labelledby.' : 'Provide aria-label or aria-labelledby.';
       out.push(fc('failed', el, check, what + ' has no accessible name' + (visible ? '' : ' and is in the tab order while visually hidden') + '. ' + hint, data));
+    });
+    return out;
+  };
+
+  rules['labels-or-instructions'] = function (options) {
+    var scope = options && options.scopeSelector;
+    var out = [];
+    var sel = 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]), select, textarea, [role="textbox"], [role="searchbox"], [role="combobox"], [role="listbox"], [role="slider"], [role="spinbutton"], [role="checkbox"], [role="radio"], [role="switch"]';
+    document.querySelectorAll(sel).forEach(function (el) {
+      if (!isVisible(el) || isHiddenFromAT(el) || !inScope(el, scope)) return;
+      if (el.nodeName === 'INPUT' && ['submit', 'button', 'reset', 'image', 'hidden'].indexOf(lower(el.type)) >= 0) return;
+      var pl = programmaticLabel(el);
+      var data = { tag: el.nodeName.toLowerCase(), type: el.getAttribute('type'), placeholder: el.getAttribute('placeholder'), title: el.getAttribute('title'), name: el.getAttribute('name') };
+      if (pl) {
+        out.push(finding('passed', el, 'Form control has a programmatic label (' + pl.kind + '): "' + pl.text.slice(0, 80) + '".', data));
+        return;
+      }
+      var hint = 'Associate a <label for>, wrap the control in <label>, or use aria-label/aria-labelledby. Placeholder, title and name attributes do not satisfy this requirement.';
+      if (data.placeholder && !data.title) {
+        out.push(finding('failed', el, 'Form control has only a placeholder ("' + norm(data.placeholder) + '") and no programmatic label. ' + hint, data));
+      } else if (data.title && !data.placeholder) {
+        out.push(finding('failed', el, 'Form control has only a title attribute ("' + norm(data.title) + '") and no programmatic label. ' + hint, data));
+      } else {
+        out.push(finding('failed', el, 'Form control has no programmatic label or instructions. ' + hint, data));
+      }
     });
     return out;
   };
@@ -1400,11 +1725,11 @@
 
   /* Walks up from a group/rowgroup to see whether it is itself inside one of the required contexts. */
   function isInRequiredContext(el, ctx) {
-    var p = el.parentElement, hops = 0;
+    var p = parentForAria(el), hops = 0;
     while (p && hops++ < 8) {
       var r = ownedRoleOf(p);
-      if (r === 'presentation' || r === 'none') { p = p.parentElement; continue; }
-      if (r === 'group' || r === 'rowgroup') { p = p.parentElement; continue; }
+      if (r === 'presentation' || r === 'none') { p = parentForAria(p); continue; }
+      if (r === 'group' || r === 'rowgroup') { p = parentForAria(p); continue; }
       return ctx.indexOf(r) >= 0;
     }
     return false;
@@ -1423,23 +1748,27 @@
    * `group`/`rowgroup` containers are recursed into because ARIA allows them to carry required owned
    * elements on behalf of their parent.
    */
-  function ownedRoles(el, depth, groupRoles) {
+  function ownedRoles(el, depth, allowedContainers) {
     var roles = [];
     var kids = Array.prototype.slice.call(el.children);
     var owns = el.getAttribute('aria-owns');
-    if (owns) owns.split(/\s+/).forEach(function (id) { var o = document.getElementById(id); if (o) kids.push(o); });
+    var tree = el.getRootNode ? el.getRootNode() : document;
+    if (owns) owns.split(/\s+/).forEach(function (id) {
+      var o = tree.getElementById ? tree.getElementById(id) : document.getElementById(id);
+      if (o) kids.push(o);
+    });
     kids.forEach(function (c) {
       if (c.nodeName === 'SCRIPT' || c.nodeName === 'STYLE' || c.nodeName === 'TEMPLATE') return;
       if (lower(c.getAttribute('aria-hidden')) === 'true') return;
       if (!renderedForAT(c)) return;
       var r = ownedRoleOf(c);
       if (r === 'presentation' || r === 'none') {
-        if (depth < 5) roles = roles.concat(ownedRoles(c, depth + 1, groupRoles));
+        if (depth < 5) roles = roles.concat(ownedRoles(c, depth + 1, allowedContainers));
         return;
       }
-      if ((r === 'group' || r === 'rowgroup') && groupRoles) {
+      if ((r === 'group' || r === 'rowgroup') && allowedContainers && allowedContainers.indexOf(r) >= 0) {
         roles.push(r);
-        if (depth < 5) roles = roles.concat(ownedRoles(c, depth + 1, groupRoles));
+        if (depth < 5) roles = roles.concat(ownedRoles(c, depth + 1, allowedContainers));
         return;
       }
       roles.push(r === null ? 'generic' : r);
@@ -1447,13 +1776,47 @@
     return roles;
   }
 
+  function forEachDeepElement(fn) {
+    function walk(root) {
+      var all = root.querySelectorAll('*');
+      for (var i = 0; i < all.length; i++) {
+        fn(all[i]);
+        if (all[i].shadowRoot) walk(all[i].shadowRoot);
+      }
+    }
+    walk(document);
+  }
+
+  function parentForAria(el) {
+    if (el.parentElement) return el.parentElement;
+    var root = el.getRootNode && el.getRootNode();
+    return root && root.host ? root.host : null;
+  }
+
+  function ownerViaAriaOwns(el) {
+    if (!el.id) return null;
+    var found = null;
+    forEachDeepElement(function (owner) {
+      if (found) return;
+      var owns = owner.getAttribute('aria-owns');
+      if (!owns) return;
+      if ((' ' + owns + ' ').indexOf(' ' + el.id + ' ') < 0) return;
+      var root = owner.getRootNode ? owner.getRootNode() : document;
+      var resolved = root.getElementById ? root.getElementById(el.id) : document.getElementById(el.id);
+      if (resolved === el) found = owner;
+    });
+    return found;
+  }
+
   rules['aria-validity'] = function () {
     var out = [];
-    document.querySelectorAll('*').forEach(function (el) {
+    forEachDeepElement(function (el) {
       if (el.nodeName === 'SCRIPT' || el.nodeName === 'STYLE' || el.nodeName === 'TEMPLATE') return;
       var roleAttr = el.getAttribute('role');
       var ariaAttrs = Array.prototype.filter.call(el.attributes, function (a) { return a.name.indexOf('aria-') === 0; });
-      if (roleAttr === null && ariaAttrs.length === 0) return;
+      var implicit = IMPLICIT_ROLES[el.nodeName];
+      if (roleAttr === null && ariaAttrs.length === 0
+              && !(implicit && (REQUIRED_OWNED[implicit] || PRESENTATIONAL_CHILDREN_ROLES.indexOf(implicit) >= 0))) return;
       var exposed = inAccessibilityTree(el);
       var role = explicitRole(el);
 
@@ -1499,15 +1862,15 @@
         var ctx = REQUIRED_CONTEXT[role];
         if (ctx) {
           // the owner is the nearest ancestor that is not explicitly presentational
-          var p = el.parentElement, ok = false, hops = 0;
+          var p = parentForAria(el), ok = false, hops = 0;
           while (p && hops++ < 8) {
             var pr = ownedRoleOf(p);
-            if (pr === 'presentation' || pr === 'none') { p = p.parentElement; continue; }
+            if (pr === 'presentation' || pr === 'none') { p = parentForAria(p); continue; }
             ok = ctx.indexOf(pr) >= 0 || (pr === 'rowgroup' && ctx.indexOf('table') >= 0)
                     || ((pr === 'group' || pr === 'rowgroup') && isInRequiredContext(p, ctx));
             break;
           }
-          var ownedBy = el.id ? document.querySelector('[aria-owns~="' + esc(el.id) + '"]') : null;
+          var ownedBy = ownerViaAriaOwns(el);
           if (!ok && ownedBy) ok = ctx.indexOf(ownedRoleOf(ownedBy)) >= 0;
           if (!ok) out.push(fc('failed', el, 'role-required-context', 'role="' + role + '" must be owned by an element with role ' + ctx.join(' or ') + '; its nearest non-presentational ancestor is "' + (p ? ownedRoleOf(p) || 'generic' : 'none') + '".', { role: role, requiredContext: ctx }));
           else out.push(fc('passed', el, 'role-required-context', 'role="' + role + '" is in a valid context.', { role: role }));
@@ -1516,9 +1879,11 @@
       var ownerRole = effectiveRole || (roleAttr === null ? IMPLICIT_ROLES[el.nodeName] : null);
       if (exposed && ownerRole) {
         var needOwned = REQUIRED_OWNED[ownerRole];
-        if (needOwned) {
-          var owned = ownedRoles(el, 0, true);
-          var permitted = needOwned.concat(['group', 'rowgroup']);
+        if (needOwned && lower(el.getAttribute('aria-busy')) === 'true') {
+          // still loading owned children; ACT treats this as inapplicable
+        } else if (needOwned) {
+          var owned = ownedRoles(el, 0, needOwned);
+          var permitted = needOwned;
           var bad = owned.filter(function (r) { return permitted.indexOf(r) < 0; });
           if (bad.length) {
             out.push(fc('failed', el, 'role-required-owned', 'role="' + ownerRole + '" owns element(s) exposed as ' + bad.filter(function (v, i, a) { return a.indexOf(v) === i; }).join(', ') + '; it must own only ' + needOwned.join(', ') + '.', { role: ownerRole, owned: owned, required: needOwned }));
@@ -1541,6 +1906,7 @@
        * actually exposes.
        */
       var effRole = role && VALID_ROLES.indexOf(role) >= 0 ? role : computedRole(el);
+      if (!renderedForAT(el) && !isFocusable(el)) return;
       if ((effRole === 'presentation' || effRole === 'none')
               && (isFocusable(el) || ariaAttrs.some(function (a) { return GLOBAL_ARIA.indexOf(a.name.toLowerCase()) >= 0 && a.name.toLowerCase() !== 'aria-hidden'; }))) {
         effRole = IMPLICIT_ROLES[el.nodeName] || 'generic';
@@ -1553,8 +1919,13 @@
         }
         out.push(fc('passed', el, 'aria-attr-defined', a.name + ' is defined in WAI-ARIA.', { attribute: a.name }));
         var value = norm(a.value);
-        // an empty value means the attribute is not set to anything, so there is nothing to validate
-        if (value === '' && an !== 'aria-label' && an !== 'aria-roledescription' && an !== 'aria-placeholder' && an !== 'aria-valuetext' && an !== 'aria-description') return;
+        // an empty value is not a valid state, but the attribute is still present: check permission
+        if (value === '' && an !== 'aria-label' && an !== 'aria-roledescription' && an !== 'aria-placeholder' && an !== 'aria-valuetext' && an !== 'aria-description') {
+          if (GLOBAL_ARIA.indexOf(an) < 0 && effRole && ROLE_SUPPORTED[effRole] && ROLE_SUPPORTED[effRole].indexOf(an) < 0) {
+            out.push(fc('failed', el, 'aria-attr-permitted', a.name + ' is not supported by role "' + effRole + '"; assistive technology ignores it.', { attribute: a.name, role: effRole }));
+          }
+          return;
+        }
         if (!exposed) return; // an unexposed element conveys nothing either way
         if (an === 'aria-relevant') {
           var relevantOk = value.split(/\s+/).every(function (t) { return ['additions', 'removals', 'text', 'all'].indexOf(t) >= 0; });
@@ -1608,6 +1979,11 @@
         } else {
           var focusables = Array.prototype.filter.call(el.querySelectorAll('*'), isTabbable);
           if (isTabbable(el)) focusables.unshift(el);
+          focusables = focusables.filter(function (f) {
+            var r = f.getBoundingClientRect();
+            if (r.bottom > -50 && r.top < innerHeight + 50) return true;
+            return !isFocusWrapSentinel(f);
+          });
           if (focusables.length) out.push(fc('failed', el, 'aria-hidden-focusable', 'aria-hidden="true" subtree contains ' + focusables.length + ' element(s) in sequential focus order (e.g. ' + cssPath(focusables[0]) + '). Screen reader users land on content that is not announced.', { focusable: focusables.slice(0, 5).map(cssPath) }));
           else out.push(fc('passed', el, 'aria-hidden-focusable', 'aria-hidden="true" subtree has no focusable content.', {}));
         }
@@ -1733,21 +2109,29 @@
     var skip = null;
     for (var i = 0; i < Math.min(5, tabs.length); i++) {
       var t = tabs[i];
-      if (t.nodeName === 'A') {
-        var href = t.getAttribute('href') || '';
-        var hash = href.indexOf('#') >= 0 ? href.slice(href.indexOf('#') + 1) : '';
-        if (hash && (document.getElementById(hash) || document.getElementsByName(hash).length) && /skip|jump|main|content/i.test(accessibleName(t) + ' ' + hash)) { skip = t; break; }
+      var label = accessibleName(t);
+      var href = t.getAttribute('href') || '';
+      var hash = href.indexOf('#') >= 0 ? href.slice(href.indexOf('#') + 1) : '';
+      var onclick = t.getAttribute('onclick') || '';
+      if ((t.nodeName === 'A' || t.nodeName === 'BUTTON') && /skip|jump|main|content|hide|toggle/i.test(label + ' ' + hash + ' ' + onclick)) {
+        if (hash && (document.getElementById(hash) || document.getElementsByName(hash).length)) { skip = t; break; }
+        if (/skip|hide|toggle/i.test(label + ' ' + onclick)) { skip = t; break; }
       }
     }
     var hasMain = !!document.querySelector('main, [role="main"]');
     var landmarkCount = document.querySelectorAll('main, nav, header, footer, aside, [role="main"], [role="navigation"], [role="banner"], [role="contentinfo"], [role="complementary"], [role="region"][aria-label], [role="region"][aria-labelledby], [role="search"]').length;
     var headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6, [role="heading"]').length;
     var repeated = document.querySelectorAll('nav a[href], header a[href], [role="navigation"] a[href]').length;
-    var data = { skipLink: skip ? cssPath(skip) : null, mainLandmark: hasMain, landmarks: landmarkCount, headings: headings, repeatedLinks: repeated };
-    if (skip) out.push(finding('passed', skip, 'Skip link "' + norm(accessibleName(skip)) + '" is among the first focusable elements.', data));
+    var mainEl = document.querySelector('main, [role="main"], #main');
+    var blocking = 0;
+    document.querySelectorAll('aside, nav, header, [role="complementary"], [role="navigation"]').forEach(function (el) {
+      if (!mainEl || (el.compareDocumentPosition(mainEl) & Node.DOCUMENT_POSITION_FOLLOWING)) blocking++;
+    });
+    var data = { skipLink: skip ? cssPath(skip) : null, mainLandmark: hasMain, landmarks: landmarkCount, headings: headings, repeatedLinks: repeated, blocking: blocking };
+    if (skip) out.push(finding('passed', skip, 'Skip link or hide control "' + norm(accessibleName(skip)) + '" is among the first focusable elements.', data));
     else if (hasMain || landmarkCount >= 2) out.push(finding('passed', null, 'No skip link, but landmarks allow bypassing repeated blocks (ARIA11).', data));
-    else if (headings >= 2) out.push(finding('needsReview', null, 'No skip link or landmarks; only headings (' + headings + ') provide a bypass mechanism. Add a <main> landmark or a skip link.', data));
-    else if (repeated >= 3) out.push(finding('failed', null, 'Repeated navigation (' + repeated + ' links) with no skip link, landmarks or heading structure to bypass it.', data));
+    else if (headings >= 1) out.push(finding('passed', null, 'Heading structure lets users bypass repeated blocks.', data));
+    else if (blocking && (repeated >= 1 || blocking >= 1)) out.push(finding('failed', null, 'Repeated or complementary content before the main content, with no skip link, landmarks or heading structure to bypass it.', data));
     else out.push(finding('inapplicable', null, 'No repeated blocks of content detected.', data));
     return out;
   };
@@ -1977,16 +2361,19 @@
         var m = decl.match(re);
         if (!m) return;
         var raw = norm(m[1]);
-        // a CSS-wide keyword does not fix a value, so a user stylesheet can still take effect
-        if (CSS_WIDE_KEYWORDS.indexOf(lower(raw)) >= 0) return;
         if (!hasOwnText(el) || !isOnScreen(el)) return;
         // line-height only affects text that occupies more than one line
         if (spec.prop === 'line-height' && lineBoxCount(el) < 2) return;
         var cs = style(el);
         if (!cs) return;
         var fontSize = parseFloat(cs.fontSize);
-        var actual = parseFloat(cs[spec.prop === 'line-height' ? 'lineHeight' : spec.prop === 'letter-spacing' ? 'letterSpacing' : 'wordSpacing']);
-        if (spec.prop !== 'line-height' && lower(raw) === 'normal') actual = 0;
+        var computed = cs[spec.prop === 'line-height' ? 'lineHeight' : spec.prop === 'letter-spacing' ? 'letterSpacing' : 'wordSpacing'];
+        var actual = parseFloat(computed);
+        var keyword = lower(raw);
+        // inherit/unset/revert still follow the parent, so a user stylesheet can override them
+        if (keyword === 'inherit' || keyword === 'unset' || keyword === 'revert' || keyword === 'revert-layer') return;
+        if (spec.prop !== 'line-height' && (keyword === 'normal' || keyword === 'initial')) actual = 0;
+        if (spec.prop === 'line-height' && (isNaN(actual) || keyword === 'normal' || keyword === 'initial')) actual = fontSize * 1.2;
         var required = fontSize * spec.factor;
         var data = { property: spec.prop, declared: raw, computedPx: isNaN(actual) ? null : Math.round(actual * 100) / 100, requiredPx: Math.round(required * 100) / 100, fontSizePx: fontSize };
         if (isNaN(actual)) { out.push(fc('cantTell', el, spec.check, spec.prop + ' is set with !important but the computed value could not be resolved.', data)); return; }
@@ -2196,6 +2583,14 @@
       var pcs = style(el.parentElement);
       ['outlineStyle', 'outlineWidth', 'boxShadow', 'borderTopColor', 'backgroundColor'].forEach(function (p) { res['parent.' + p] = pcs ? pcs[p] : null; });
     }
+    [['prev', el.previousElementSibling], ['next', el.nextElementSibling]].forEach(function (pair) {
+      if (!pair[1]) return;
+      var ncs = style(pair[1]);
+      if (!ncs) return;
+      ['display', 'backgroundColor', 'borderTopWidth', 'borderTopStyle', 'boxShadow', 'outlineStyle', 'outlineWidth'].forEach(function (p) {
+        res[pair[0] + '.' + p] = ncs[p];
+      });
+    });
     return res;
   }
 
@@ -2398,6 +2793,184 @@
     };
   };
 
+  /* --- observation around user actions (3.3.1 / 4.1.3) ------------------- */
+
+  var observationState = null;
+
+  function isLiveRegionEl(el) {
+    if (!el || el.nodeType !== 1) return false;
+    var live = lower(el.getAttribute('aria-live'));
+    if (live && live !== 'off') return true;
+    var role = explicitRole(el);
+    return role === 'alert' || role === 'status' || role === 'log';
+  }
+
+  function logObservation(kind, detail) {
+    if (!observationState) return;
+    observationState.events.push(Object.assign({ kind: kind, t: Date.now() }, detail || {}));
+  }
+
+  function visibleErrorCandidates() {
+    var out = [];
+    document.querySelectorAll('[aria-invalid="true"], .error, .invalid, [class*="error"], [class*="invalid"], [role="alert"]').forEach(function (el) {
+      if (!isVisible(el) || isHiddenFromAT(el)) return;
+      var text = norm(el.textContent);
+      if (!text && el.nodeName !== 'INPUT' && el.nodeName !== 'SELECT' && el.nodeName !== 'TEXTAREA') return;
+      var associated = lower(el.getAttribute('aria-invalid')) === 'true'
+        || !!el.getAttribute('aria-errormessage')
+        || !!el.getAttribute('aria-describedby')
+        || el.getAttribute('role') === 'alert';
+      var styleOnly = !associated && el.nodeName === 'INPUT' && style(el) && (style(el).borderColor || '').indexOf('rgb') >= 0;
+      out.push({ el: el, text: text, associated: associated, styleOnly: styleOnly && !text });
+    });
+    document.querySelectorAll('input, select, textarea').forEach(function (el) {
+      if (!isVisible(el)) return;
+      if (lower(el.getAttribute('aria-invalid')) === 'true') return;
+      var cs = style(el);
+      if (!cs) return;
+      var bc = lower(cs.borderColor || '');
+      if ((bc.indexOf('rgb(255') >= 0 || bc.indexOf('#f') === 0) && (cs.borderWidth || '').indexOf('0') !== 0) {
+        var hasMsg = !!el.getAttribute('aria-errormessage') || !!el.getAttribute('aria-describedby');
+        if (!hasMsg) out.push({ el: el, text: '', associated: false, styleOnly: true });
+      }
+    });
+    return out;
+  }
+
+  function statusMessageCandidates() {
+    var out = [];
+    document.querySelectorAll('[role="status"], [role="alert"], .success, .notice, [class*="success"]').forEach(function (el) {
+      if (!isVisible(el)) return;
+      var text = norm(el.textContent);
+      if (text) out.push({ el: el, text: text, live: isLiveRegionEl(el) });
+    });
+    return out;
+  }
+
+  A.observeStart = function () {
+    if (observationState) A.observeStop();
+    observationState = { events: [], urlBefore: location.href, focus: [] };
+    function onFocus(e) {
+      logObservation('focus', { selector: cssPath(e.target), tag: e.target && e.target.nodeName });
+    }
+    function onMut(mutations) {
+      mutations.forEach(function (m) {
+        if (m.type === 'attributes') {
+          var an = m.attributeName;
+          if (an === 'aria-invalid' || an === 'aria-errormessage' || an === 'aria-describedby' || an === 'class') {
+            logObservation('attr', { selector: cssPath(m.target), attribute: an, value: m.target.getAttribute(an) });
+          }
+          if (an === 'aria-live') logObservation('live-region-attr', { selector: cssPath(m.target), value: m.target.getAttribute(an) });
+        } else if (m.type === 'childList') {
+          m.addedNodes.forEach(function (n) {
+            if (n.nodeType !== 1) return;
+            if (isLiveRegionEl(n) || n.querySelector('[aria-live], [role="alert"], [role="status"]')) {
+              logObservation('live-region-node', { selector: cssPath(n), text: norm(n.textContent).slice(0, 200) });
+            }
+            if (/error|invalid|alert/i.test(n.className || '') || n.getAttribute('role') === 'alert') {
+              logObservation('error-node', { selector: cssPath(n), text: norm(n.textContent).slice(0, 200) });
+            }
+          });
+        }
+      });
+    }
+    observationState._observer = new MutationObserver(onMut);
+    observationState._observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-invalid', 'aria-errormessage', 'aria-describedby', 'aria-live', 'class', 'role'] });
+    document.addEventListener('focusin', onFocus, true);
+    observationState._onFocus = onFocus;
+    return { started: true, urlBefore: observationState.urlBefore };
+  };
+
+  A.observeStop = function () {
+    if (!observationState) return { events: [], urlBefore: location.href, urlAfter: location.href };
+    if (observationState._observer) observationState._observer.disconnect();
+    if (observationState._onFocus) document.removeEventListener('focusin', observationState._onFocus, true);
+    var result = { events: observationState.events, urlBefore: observationState.urlBefore, urlAfter: location.href, primarySelector: null };
+    observationState = null;
+    return result;
+  };
+
+  A.activateProbeWidgets = function (arg) {
+    var max = (arg && arg.max) || 3;
+    var activated = [];
+    var candidates = [];
+    document.querySelectorAll('input[type="date"], input[type="datetime-local"], input[type="time"], [aria-haspopup="dialog"], [aria-haspopup="true"], button, [role="button"]').forEach(function (el) {
+      if (!isVisible(el) || isHiddenFromAT(el)) return;
+      var label = lower(visibleText(el) + ' ' + accessibleName(el));
+      if (/load more|show more|open calendar|datepicker|pick a date/.test(label)) candidates.push(el);
+      if (el.nodeName === 'INPUT' && /date|time/.test(lower(el.type))) candidates.push(el);
+      if (lower(el.getAttribute('aria-haspopup')) === 'dialog' || lower(el.getAttribute('aria-haspopup')) === 'true') candidates.push(el);
+    });
+    for (var i = 0; i < candidates.length && activated.length < max; i++) {
+      var el = candidates[i];
+      try {
+        el.click();
+        activated.push(cssPath(el));
+      } catch (e) { /* ignore */ }
+    }
+    return { activated: activated };
+  };
+
+  rules['error-identification'] = function (options) {
+    var obs = options && options.observation;
+    var out = [];
+    var forms = document.querySelectorAll('form');
+    if (!forms.length) return out;
+    var errors = visibleErrorCandidates();
+    var observed = obs && obs.events && obs.events.length > 0;
+    if (observed) {
+      var hasErrorSignal = errors.length > 0 || (obs.events || []).some(function (e) { return e.kind === 'error-node' || e.kind === 'attr' && e.attribute === 'aria-invalid'; });
+      if (!hasErrorSignal) {
+        out.push(finding('passed', forms[0], 'No error state appeared after the observed action.', { observed: true }));
+        return out;
+      }
+      errors.forEach(function (err) {
+        if (err.associated) {
+          out.push(finding('passed', err.el, 'Error is programmatically associated with the control.', { text: err.text }));
+        } else {
+          out.push(finding('failed', err.el, 'Error is visible (text or styling) but not programmatically associated (aria-invalid, aria-errormessage, aria-describedby, or role=alert).', { styleOnly: err.styleOnly, text: err.text }));
+        }
+      });
+      return out;
+    }
+    if (errors.length) {
+      var unassoc = errors.filter(function (e) { return !e.associated; });
+      if (unassoc.length) {
+        out.push(finding('cantTell', unassoc[0].el, 'Error-looking content is present but no action was observed. Wrap the submit or validation trigger in observe() to confirm error identification (3.3.1).', { candidates: errors.length }));
+        return out;
+      }
+    }
+    return out;
+  };
+
+  rules['status-messages'] = function (options) {
+    var obs = options && options.observation;
+    var out = [];
+    var statuses = statusMessageCandidates();
+    var liveLog = obs && obs.events ? obs.events.filter(function (e) { return e.kind === 'live-region-node' || e.kind === 'live-region-attr'; }) : [];
+    var urlChanged = obs && obs.urlBefore && obs.urlAfter && obs.urlBefore !== obs.urlAfter;
+    var observed = obs && obs.events && obs.events.length > 0;
+    if (observed) {
+      var statusChange = urlChanged || liveLog.length > 0 || (obs.events || []).some(function (e) { return e.kind === 'error-node'; }) || statuses.length > 0;
+      if (!statusChange) {
+        out.push(finding('passed', document.body, 'No status change detected after the observed action.', { observed: true }));
+        return out;
+      }
+      var announced = liveLog.length > 0 || statuses.some(function (s) { return s.live; });
+      if (!announced) {
+        out.push(finding('failed', statuses.length ? statuses[0].el : document.body, 'A status or result change occurred (navigation or new message content) but no live region (aria-live, role=alert/status) announced it.', { urlChanged: urlChanged, statuses: statuses.length }));
+      } else {
+        out.push(finding('passed', document.body, 'Status change was exposed through a live region.', { liveEvents: liveLog.length }));
+      }
+      return out;
+    }
+    var forms = document.querySelectorAll('form');
+    if (forms.length || statuses.length) {
+      out.push(finding('cantTell', forms.length ? forms[0] : document.body, 'This page may show status messages after submit. Wrap the action that should announce results in observe() to evaluate 4.1.3.', { hasForm: forms.length > 0 }));
+    }
+    return out;
+  };
+
   /* ---------------------------------------------------------------- export */
 
   A.rules = Object.keys(rules);
@@ -2423,6 +2996,42 @@
     var x = Math.max(0, r.left - pad), y = Math.max(0, r.top - pad);
     var right = Math.min(innerWidth, r.right + pad), bottom = Math.min(innerHeight, r.bottom + pad);
     return { x: x, y: y, width: Math.max(1, right - x), height: Math.max(1, bottom - y) };
+  };
+
+  A.highlight = function (arg) {
+    A.clearHighlight();
+    var el = document.querySelector(arg && arg.selector);
+    if (!el) return null;
+    el.scrollIntoView({ block: 'center', inline: 'nearest' });
+    var r = el.getBoundingClientRect();
+    var box = document.createElement('div');
+    box.id = '__a11y-highlight';
+    box.setAttribute('aria-hidden', 'true');
+    box.style.cssText = [
+      'position:fixed',
+      'z-index:2147483647',
+      'pointer-events:none',
+      'box-sizing:border-box',
+      'border:3px solid #e11d48',
+      'border-radius:2px',
+      'box-shadow:0 0 0 3px rgba(225,29,72,.35),0 0 0 9999px rgba(15,15,15,.38)',
+      'left:' + Math.round(r.left) + 'px',
+      'top:' + Math.round(r.top) + 'px',
+      'width:' + Math.max(1, Math.round(r.width)) + 'px',
+      'height:' + Math.max(1, Math.round(r.height)) + 'px'
+    ].join(';');
+    var label = document.createElement('div');
+    label.textContent = (arg && arg.label) ? String(arg.label) : 'Issue';
+    label.style.cssText = 'position:absolute;left:-3px;bottom:100%;margin-bottom:4px;background:#e11d48;color:#fff;font:600 12px/18px system-ui,sans-serif;padding:1px 8px;white-space:nowrap;border-radius:2px 2px 2px 0;max-width:80vw;overflow:hidden;text-overflow:ellipsis;';
+    box.appendChild(label);
+    document.documentElement.appendChild(box);
+    return { x: r.left, y: r.top, width: r.width, height: r.height, dpr: window.devicePixelRatio || 1 };
+  };
+
+  A.clearHighlight = function () {
+    var box = document.getElementById('__a11y-highlight');
+    if (box) box.remove();
+    return true;
   };
 
   window.__a11yAgent = A;

@@ -20,4 +20,8 @@ public record PageAudit(String step, String url, String title, String screenshot
     public long count(Outcome outcome) {
         return findings.stream().filter(f -> f.outcome() == outcome).count();
     }
+
+    public PageAudit withFindings(List<Finding> next) {
+        return new PageAudit(step, url, title, screenshot, next);
+    }
 }

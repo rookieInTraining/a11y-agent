@@ -6,6 +6,7 @@ import dev.a11yagent.core.model.Finding;
 import dev.a11yagent.core.model.Impact;
 import dev.a11yagent.core.model.Outcome;
 import dev.a11yagent.core.model.Target;
+import dev.a11yagent.core.report.HighlightPainter;
 import dev.a11yagent.core.wcag.Criterion;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -69,7 +70,7 @@ public final class Findings {
         int taken = 0;
         for (Finding f : findings) {
             if (f.outcome().isIssue() && taken < MAX_SCREENSHOTS_PER_RULE && f.target().rect() != null && !f.target().rect().isEmpty()) {
-                String path = elementScreenshot(ctx, f.target().selector(), f.ruleId(), 16);
+                String path = highlightedScreenshot(ctx, f.target().selector(), f.ruleId(), f.ruleId(), f.target().rect());
                 if (path != null) {
                     out.add(f.withEvidence(f.evidence().withScreenshot(path)));
                     taken++;
@@ -79,6 +80,45 @@ public final class Findings {
             out.add(f);
         }
         return out;
+    }
+
+    /** Viewport screenshot with the target outlined, after scrolling it into view. */
+    public static String highlightedScreenshot(RuleContext ctx, String selector, String prefix, String label, Rect fallback) {
+        byte[] png = highlightedPng(ctx, selector, label, fallback);
+        if (png == null) {
+            return elementScreenshot(ctx, selector, prefix, 16);
+        }
+        return ctx.artifacts().savePng(prefix, png);
+    }
+
+    public static byte[] highlightedPng(RuleContext ctx, String selector, String label, Rect fallback) {
+        try {
+            ctx.inPage().ensureInstalled();
+            Object hit = ctx.inPage().call("highlight", Map.of("selector", selector, "label", label == null ? "" : label));
+            byte[] png = ctx.driver().screenshot(false);
+            ctx.recorder().ifPresent(r -> r.offer(png));
+            ctx.inPage().call("clearHighlight", null);
+            if (png == null || png.length == 0) {
+                return null;
+            }
+            Rect box = Rect.from(hit);
+            if (box == null || box.isEmpty()) {
+                box = fallback;
+            }
+            var vp = ctx.driver().viewport();
+            double dpr = 1;
+            if (hit instanceof Map<?, ?> m && m.get("dpr") instanceof Number n) {
+                dpr = n.doubleValue();
+            }
+            return HighlightPainter.paint(png, box, vp.width(), dpr);
+        } catch (RuntimeException e) {
+            try {
+                ctx.inPage().call("clearHighlight", null);
+            } catch (RuntimeException ignored) {
+                // overlay may not have been installed
+            }
+            return null;
+        }
     }
 
     /** Screenshot of an element with padding, after scrolling it into view. Returns the artifact path or null. */
